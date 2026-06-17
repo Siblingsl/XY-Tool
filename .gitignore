@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+server/node_modules/
+web/node_modules/
+
+# Build output
+dist/
+build/
+server/dist/
+web/dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+server/.env
+web/.env
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Database
+*.sqlite
+*.db
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# TypeScript
+*.tsbuildinfo
+
+# Docker volumes (local data)
+mysql-data/
+redis-data/
+
+# Sensitive
+*.pem
+*.key
+secrets/

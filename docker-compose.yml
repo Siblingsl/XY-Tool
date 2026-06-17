@@ -1,0 +1,89 @@
+version: "3.9"
+
+# ============================================================
+# 闲鱼自动发货工具 - 容器编排
+# 包含: PostgreSQL 16 + Redis 7 + 后端 API + 前端 Web
+# ============================================================
+
+services:
+  # ---------- 数据库 ----------
+  postgres:
+    image: postgres:16-alpine
+    container_name: xianyu-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-xianyu_dev_password}
+      POSTGRES_DB: ${DB_DATABASE:-xianyu_autodeliver}
+      POSTGRES_USER: ${DB_USERNAME:-xianyu}
+      TZ: Asia/Shanghai
+      PGTZ: Asia/Shanghai
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-xianyu} -d ${DB_DATABASE:-xianyu_autodeliver}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------- 缓存 / 队列 ----------
+  redis:
+    image: redis:7-alpine
+    container_name: xianyu-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: ${REDIS_PASSWORD:+redis-server --requirepass $REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------- 后端 API ----------
+  # 开发模式：通过命令 npm run start:dev 启动，挂载源码热重载
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: xianyu-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: npm run start:dev
+
+  # ---------- 前端 Web 控制台 ----------
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: xianyu-web
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+    depends_on:
+      - server
+    command: npm run dev -- --host
+
+volumes:
+  postgres-data:
+  redis-data:
