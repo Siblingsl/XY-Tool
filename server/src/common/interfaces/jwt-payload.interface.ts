@@ -12,4 +12,10 @@ export interface JwtPayload {
   tenantId: number;
   /** 角色 */
   role: string;
+  /**
+   * Token 类型：
+   * - access: 业务接口鉴权用（短效）
+   * - refresh: 换取 access token 用（长效），不可直接访问业务接口
+   */
+  type?: 'access' | 'refresh';
 }

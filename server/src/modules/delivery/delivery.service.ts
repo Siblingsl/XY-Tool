@@ -13,6 +13,7 @@ import { MessageApi } from '../../xianyu/apis/message.api';
 import { GoofishMtopService } from '../../goofish/goofish-mtop.service';
 import { GOOFISH_UA } from '../../goofish/goofish.constants';
 import { handleAccountAuthError } from '../accounts/account-auth.util';
+import { RealtimeService } from '../realtime/realtime.service';
 
 /**
  * 发货执行引擎。
@@ -39,6 +40,7 @@ export class DeliveryService {
     private readonly ordersService: OrdersService,
     private readonly messageApi: MessageApi,
     private readonly goofishMtop: GoofishMtopService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async processOrder(order: OrderEntity): Promise<{
@@ -154,6 +156,8 @@ export class DeliveryService {
         : 'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36',
     };
 
+    let imSent = false;
+
     try {
       await this.messageApi.sendTextMessage(
         ctx,
@@ -172,6 +176,7 @@ export class DeliveryService {
           },
         },
       );
+      imSent = true;
 
       // IM 发送成功后立即写日志，防止崩溃后重复发卡
       await this.writeLog(
@@ -220,7 +225,14 @@ export class DeliveryService {
         account.id,
         err,
       );
-      await this.failWithLog(order, product, kamiItemId, errorMsg, start);
+      if (imSent) {
+        // IM 已发送 + success 日志已写入 → 不释放卡密，由 recoverStuckOrders 兜底完成
+        this.logger.warn(
+          `订单 ${order.bizOrderId} IM 已发送但后续流程异常: ${errorMsg}`,
+        );
+      } else {
+        await this.failWithLog(order, product, kamiItemId, errorMsg, start);
+      }
       return { success: false, message: errorMsg };
     }
   }
@@ -297,6 +309,7 @@ export class DeliveryService {
         const kamiItem = await this.kamiPoolService.acquireItem(
           product.kamiPoolId,
           order.id,
+          order.tenantId,
         );
         if (!kamiItem) return { content: null, kamiItemId: null };
         const text = [
@@ -385,5 +398,13 @@ export class DeliveryService {
       durationMs: Date.now() - startTime,
     });
     await this.logRepo.save(log);
+
+    // 实时推送发货结果到前端
+    this.realtime.pushDeliveryResult(order.tenantId, {
+      orderId: order.id,
+      result,
+      deliveryType: product.deliveryType,
+      durationMs: Date.now() - startTime,
+    });
   }
 }

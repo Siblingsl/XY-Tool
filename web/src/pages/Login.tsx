@@ -29,6 +29,7 @@ export default function Login() {
     try {
       const res: any = await api.post("/auth/login", values);
       localStorage.setItem("accessToken", res.accessToken);
+      localStorage.setItem("refreshToken", res.refreshToken);
       localStorage.setItem("user", JSON.stringify(res.user));
       message.success("登录成功");
       if (!res.accessToken) {
@@ -53,6 +54,7 @@ export default function Login() {
     try {
       const res: any = await api.post("/auth/register", values);
       localStorage.setItem("accessToken", res.accessToken);
+      localStorage.setItem("refreshToken", res.refreshToken);
       localStorage.setItem("user", JSON.stringify(res.user));
       message.success("注册成功");
       navigate("/dashboard", { replace: true });

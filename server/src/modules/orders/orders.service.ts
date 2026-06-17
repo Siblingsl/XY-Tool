@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between, LessThan } from 'typeorm';
 import { OrderEntity, OrderStatus } from './order.entity';
+import { RealtimeService } from '../realtime/realtime.service';
 
 /**
  * 订单管理服务。
@@ -17,6 +18,7 @@ export class OrdersService {
   constructor(
     @InjectRepository(OrderEntity)
     private readonly repo: Repository<OrderEntity>,
+    private readonly realtime: RealtimeService,
   ) {}
 
   /** 按闲鱼订单号查询（幂等检查用） */
@@ -53,6 +55,10 @@ export class OrdersService {
     });
     const saved = await this.repo.save(entity);
     this.logger.log(`新订单: ${saved.bizOrderId} (${saved.itemTitle})`);
+    this.realtime.pushOrderCreated(saved.tenantId, {
+      bizOrderId: saved.bizOrderId,
+      itemTitle: saved.itemTitle,
+    });
     return { created: true, order: saved };
   }
 
@@ -80,14 +86,28 @@ export class OrdersService {
 
   /** 标记发货成功 */
   async markDelivered(id: number): Promise<void> {
-    await this.updateStatus(id, 'DELIVERED');
-    this.logger.log(`订单已发货: ${id}`);
+    const order = await this.repo.findOne({ where: { id } });
+    if (order) {
+      await this.repo.update(id, { status: 'DELIVERED' });
+      this.logger.log(`订单已发货: ${id}`);
+      this.realtime.pushOrderStatus(order.tenantId, {
+        bizOrderId: order.bizOrderId,
+        status: 'DELIVERED',
+      });
+    }
   }
 
   /** 标记发货失败 */
   async markFailed(id: number, reason: string): Promise<void> {
-    await this.updateStatus(id, 'FAILED', { failReason: reason });
-    this.logger.warn(`订单发货失败: ${id} - ${reason}`);
+    const order = await this.repo.findOne({ where: { id } });
+    if (order) {
+      await this.repo.update(id, { status: 'FAILED', failReason: reason });
+      this.logger.warn(`订单发货失败: ${id} - ${reason}`);
+      this.realtime.pushOrderStatus(order.tenantId, {
+        bizOrderId: order.bizOrderId,
+        status: 'FAILED',
+      });
+    }
   }
 
   /** 标记忽略（无匹配规则等） */

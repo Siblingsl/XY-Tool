@@ -24,6 +24,10 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   }
 
   async validate(payload: JwtPayload) {
+    // 拒绝 refresh token 访问业务接口（必须用 access token）
+    if (payload.type && payload.type !== 'access') {
+      throw new UnauthorizedException('请使用 accessToken 访问');
+    }
     const user = await this.usersService.findById(payload.sub);
     if (!user || user.status !== 'active') {
       throw new UnauthorizedException('用户不存在或已被禁用');
@@ -34,6 +38,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       username: user.username,
       tenantId: user.tenantId,
       role: user.role,
+      type: 'access' as const,
     } as JwtPayload;
   }
 }

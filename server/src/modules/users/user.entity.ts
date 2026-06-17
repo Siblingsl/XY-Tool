@@ -31,4 +31,19 @@ export class UserEntity extends BaseEntity {
   /** 角色：admin 普通租户管理员 / system 系统管理员（预留） */
   @Column({ length: 20, default: 'admin', comment: '角色' })
   role: string;
+
+  /**
+   * Refresh Token 的 bcrypt 哈希（select:false 默认不返回）。
+   * 存哈希而非明文，可在服务端吊销（登出/改密时置空）。
+   * 为空表示当前无有效 refresh token。
+   */
+  @Column({
+    length: 100,
+    type: 'varchar',
+    name: 'refresh_token_hash',
+    nullable: true,
+    select: false,
+    comment: 'Refresh Token 哈希',
+  })
+  refreshTokenHash: string | null;
 }

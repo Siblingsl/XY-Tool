@@ -7,10 +7,6 @@ import Products from './pages/Products';
 import KamiPool from './pages/KamiPool';
 import Orders from './pages/Orders';
 
-/**
- * 应用根组件 + 路由。
- * 未登录访问受保护页面时重定向到 /login。
- */
 export default function App() {
   return (
     <BrowserRouter>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Button,
   Card,
@@ -13,17 +13,15 @@ import {
 import { ReloadOutlined, RedoOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api from '../api';
+import { wsClient } from '../api/ws';
 
-/**
- * 订单与发货日志页。
- * 两个 Tab：订单列表（含状态）、发货日志。
- */
 export default function Orders() {
   const [orders, setOrders] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [tabKey, setTabKey] = useState('orders');
 
-  const refreshOrders = async () => {
+  const refreshOrders = useCallback(async () => {
     setLoading(true);
     try {
       const res: any = await api.get('/orders', { params: { size: 50 } });
@@ -33,9 +31,9 @@ export default function Orders() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const refreshLogs = async () => {
+  const refreshLogs = useCallback(async () => {
     setLoading(true);
     try {
       const res: any = await api.get('/delivery/logs', { params: { size: 50 } });
@@ -45,11 +43,21 @@ export default function Orders() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshOrders();
-  }, []);
+    const offStatus = wsClient.on('order:status', () => {
+      if (tabKey === 'orders') refreshOrders();
+    });
+    const offDelivery = wsClient.on('delivery:result', () => {
+      if (tabKey === 'logs') refreshLogs();
+    });
+    return () => {
+      offStatus();
+      offDelivery();
+    };
+  }, [tabKey, refreshOrders, refreshLogs]);
 
   const handleRetry = async (orderId: number) => {
     try {
@@ -177,6 +185,7 @@ export default function Orders() {
       <Tabs
         defaultActiveKey="orders"
         onChange={(key) => {
+          setTabKey(key);
           if (key === 'logs') refreshLogs();
           else refreshOrders();
         }}

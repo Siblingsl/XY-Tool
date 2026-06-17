@@ -15,6 +15,14 @@ export default () => ({
     database: process.env.DB_DATABASE || 'xianyu_autodeliver',
     sync: String(process.env.DB_SYNC) === 'true',
     logging: process.env.DB_LOGGING === 'true',
+    /**
+     * 启动时是否自动执行未运行的 migration。
+     * 生产推荐 true（配合 DB_SYNC=false）；开发默认 false（用 sync 建表）。
+     */
+    migrationsRun:
+      process.env.DB_MIGRATIONS_RUN == null
+        ? process.env.NODE_ENV === 'production'
+        : String(process.env.DB_MIGRATIONS_RUN) === 'true',
   },
 
   redis: {
@@ -24,8 +32,16 @@ export default () => ({
   },
 
   jwt: {
-    secret: process.env.JWT_SECRET || 'insecure_default_secret',
+    secret: process.env.JWT_SECRET,
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
+    /**
+     * Refresh Token 配置。
+     * - refreshSecret 默认派生自主 secret（加后缀），生产建议单独设置
+     * - refreshExpiresIn 默认 30 天，覆盖 access 过期后无感续期
+     */
+    refreshSecret:
+      process.env.JWT_REFRESH_SECRET || (process.env.JWT_SECRET ? process.env.JWT_SECRET + '_refresh' : undefined),
+    refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
   },
 
   /**
@@ -76,5 +92,11 @@ export default () => ({
 
   cors: {
     origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  },
+
+  /** 全局限流（毫秒窗口 + 最大请求数）。auth 路由另在 Controller 收紧。 */
+  throttle: {
+    ttl: parseInt(process.env.THROTTLE_TTL || '60000', 10),
+    limit: parseInt(process.env.THROTTLE_LIMIT || '120', 10),
   },
 });

@@ -1,13 +1,3 @@
-import { plainToInstance } from 'class-transformer';
-import {
-  IsEnum,
-  IsNumber,
-  IsString,
-  MaxLength,
-  MinLength,
-  validateSync,
-} from 'class-validator';
-
 /**
  * 可用的签名服务提供者
  * - mock:  开发用，返回固定假签名
@@ -21,61 +11,57 @@ export enum SignProviderType {
   Goofish = 'goofish',
 }
 
+interface ValidationRule {
+  name: string;
+  required?: boolean;
+  validate: (val: unknown) => string | null; // null = 通过，string = 错误消息
+  transform?: (val: unknown) => unknown;     // 转为目标类型
+}
+
 export class EnvironmentVariables {
-  @IsString()
-  NODE_ENV: string;
-
-  @IsNumber()
-  PORT: number;
-
-  @IsString()
-  DB_HOST: string;
-
-  @IsNumber()
-  DB_PORT: number;
-
-  @IsString()
-  DB_USERNAME: string;
-
-  @IsString()
-  DB_PASSWORD: string;
-
-  @IsString()
-  DB_DATABASE: string;
-
-  @IsString()
-  REDIS_HOST: string;
-
-  @IsNumber()
-  REDIS_PORT: number;
-
-  @IsString()
-  @MinLength(16)
-  JWT_SECRET: string;
-
-  @IsString()
-  JWT_EXPIRES_IN: string;
-
-  @IsString()
-  @MinLength(64)
-  @MaxLength(64)
-  COOKIE_ENCRYPTION_KEY: string;
-
-  @IsEnum(SignProviderType)
-  SIGN_PROVIDER: SignProviderType;
-
-  @IsNumber()
-  ORDER_POLL_INTERVAL_MS: number;
-
-  /**
-   * 校验 process.env，启动时调用。
-   * 返回错误列表；为空表示通过。
-   */
   static validate(config: Record<string, unknown>): string[] {
-    const validated = plainToInstance(EnvironmentVariables, config, {
-      enableImplicitConversion: true,
-    });
-    const errors = validateSync(validated, { skipMissingProperties: false });
-    return errors.map((e) => Object.values(e.constraints || {}).join(', '));
+    const errors: string[] = [];
+
+    for (const rule of this.rules) {
+      const val = config[rule.name];
+      // 非必需且未设置 -> 跳过
+      if (rule.required === false && (val === undefined || val === '')) {
+        continue;
+      }
+      // 必需但缺失
+      if (rule.required !== false && (val === undefined || val === '')) {
+        errors.push(`${rule.name} is required`);
+        continue;
+      }
+      // 校验值
+      const err = rule.validate(val);
+      if (err) {
+        errors.push(`${rule.name}: ${err}`);
+        continue;
+      }
+      // 转换类型
+      if (rule.transform) {
+        (config as Record<string, unknown>)[rule.name] = rule.transform(val);
+      }
+    }
+
+    return errors;
   }
+
+  private static rules: ValidationRule[] = [
+    { name: 'NODE_ENV', validate: (v) => typeof v === 'string' ? null : 'must be a string' },
+    { name: 'PORT', required: false, validate: (v) => v === undefined || v === '' || (typeof v === 'string' && /^\d+$/.test(v) && Number(v) > 0 && Number(v) < 65536) ? null : 'must be a port number (1-65535)', transform: (v) => Number(v) },
+    { name: 'DB_HOST', validate: (v) => typeof v === 'string' ? null : 'must be a string' },
+    { name: 'DB_PORT', required: false, validate: (v) => v === undefined || v === '' || (typeof v === 'string' && /^\d+$/.test(v) && Number(v) > 0 && Number(v) < 65536) ? null : 'must be a port number (1-65535)', transform: (v) => Number(v) },
+    { name: 'DB_USERNAME', validate: (v) => typeof v === 'string' ? null : 'must be a string' },
+    { name: 'DB_PASSWORD', validate: (v) => typeof v === 'string' ? null : 'must be a string' },
+    { name: 'DB_DATABASE', validate: (v) => typeof v === 'string' ? null : 'must be a string' },
+    { name: 'REDIS_HOST', validate: (v) => typeof v === 'string' ? null : 'must be a string' },
+    { name: 'REDIS_PORT', required: false, validate: (v) => v === undefined || v === '' || (typeof v === 'string' && /^\d+$/.test(v) && Number(v) > 0 && Number(v) < 65536) ? null : 'must be a port number (1-65535)', transform: (v) => Number(v) },
+    { name: 'JWT_SECRET', validate: (v) => typeof v === 'string' && v.length >= 16 ? null : 'must be a string with at least 16 characters' },
+    { name: 'JWT_EXPIRES_IN', required: false, validate: (v) => v === undefined || v === '' || typeof v === 'string' ? null : 'must be a string' },
+    { name: 'COOKIE_ENCRYPTION_KEY', required: false, validate: (v) => v === undefined || v === '' || (typeof v === 'string' && v.length >= 64 && v.length <= 64) ? null : 'must be a 64-character string', transform: (v) => typeof v === 'string' ? v.padEnd(64).slice(0, 64) : v },
+    { name: 'SIGN_PROVIDER', required: false, validate: (v) => v === undefined || v === '' || Object.values(SignProviderType).includes(v as SignProviderType) ? null : `must be one of: ${Object.values(SignProviderType).join(', ')}` },
+    { name: 'ORDER_POLL_INTERVAL_MS', required: false, validate: (v) => v === undefined || v === '' || (typeof v === 'string' && /^\d+$/.test(v) && Number(v) > 0) ? null : 'must be a positive integer', transform: (v) => Number(v) },
+  ];
 }

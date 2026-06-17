@@ -8,6 +8,7 @@ import { ImPaymentListenerService } from './im-payment-listener.service';
 import { AccountsModule } from '../accounts/accounts.module';
 import { XianyuModule } from '../../xianyu/xianyu.module';
 import { GoofishModule } from '../../goofish/goofish.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { GoofishModule } from '../../goofish/goofish.module';
     AccountsModule,
     XianyuModule,
     GoofishModule,
+    RealtimeModule,
   ],
   providers: [OrdersService, OrderPollingService, ImPaymentListenerService],
   controllers: [OrdersController],

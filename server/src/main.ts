@@ -1,6 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { types } from 'pg';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
@@ -20,6 +21,8 @@ async function bootstrap() {
     bufferLogs: true,
   });
   app.setGlobalPrefix('api');
+  // WebSocket 使用原生 ws 适配器（RealtimeGateway）
+  app.useWebSocketAdapter(new WsAdapter(app));
 
   const config = app.get(ConfigService);
 

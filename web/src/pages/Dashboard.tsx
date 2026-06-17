@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Card, Col, Row, Statistic, Tag, Typography, Alert } from 'antd';
+import { Card, Col, Row, Statistic, Tag, Typography, Alert, notification } from 'antd';
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -7,9 +7,11 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import api from '../api';
+import { wsClient } from '../api/ws';
 
 /**
  * 仪表盘：展示订单统计概览 + 签名服务状态。
+ * 数据来源：首次拉取 + WS 实时推送增量更新（不再高频轮询）。
  */
 export default function Dashboard() {
   const [stats, setStats] = useState<Record<string, number>>({});
@@ -38,8 +40,39 @@ export default function Dashboard() {
 
   useEffect(() => {
     refresh();
-    const timer = setInterval(refresh, 5000);
-    return () => clearInterval(timer);
+    // 首次拉取后改用 WS 增量更新，状态变化时刷新统计
+    const reloadStats = () =>
+      api.get('/orders/stats').then((s: any) => setStats(s || {})).catch(() => {});
+    const offStatus = wsClient.on('order:status', reloadStats);
+    const offCreated = wsClient.on('order:created', (data: any) => {
+      notification.info({
+        message: '新订单',
+        description: `${data.itemTitle || ''} (${data.bizOrderId || ''})`,
+        placement: 'bottomRight',
+        duration: 3,
+      });
+      reloadStats();
+    });
+    const offLowStock = wsClient.on('kami:lowstock', (items: any) => {
+      setLowStock(Array.isArray(items) ? items : []);
+    });
+    const offExpired = wsClient.on('account:expired', (data: any) => {
+      notification.warning({
+        message: '账号 Cookie 已过期',
+        description: `账号 ID: ${data.accountId}，请重新扫码登录`,
+        placement: 'bottomRight',
+        duration: 0,
+      });
+    });
+    // 每 30s 兜底刷新一次（防止漏推）
+    const timer = setInterval(refresh, 30000);
+    return () => {
+      offStatus();
+      offCreated();
+      offLowStock();
+      offExpired();
+      clearInterval(timer);
+    };
   }, []);
 
   const pending = stats.PENDING || 0;

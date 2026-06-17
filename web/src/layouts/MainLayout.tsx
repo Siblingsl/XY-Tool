@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Layout, Menu, theme, Avatar, Space, Typography } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
+import { Badge, Layout, Menu, theme, Avatar, Space, Typography, Tooltip } from 'antd';
 import {
   DashboardOutlined,
   UserOutlined,
@@ -7,29 +7,74 @@ import {
   KeyOutlined,
   OrderedListOutlined,
   LogoutOutlined,
+  WifiOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { wsClient, type WsStatus } from '../api/ws';
 
 const { Header, Sider, Content } = Layout;
 
-/**
- * 主布局：侧边栏导航 + 顶部用户信息 + 内容区。
- */
+const statusMeta: Record<WsStatus, { color: string; text: string }> = {
+  connected: { color: '#52c41a', text: '已连接' },
+  connecting: { color: '#faad14', text: '连接中...' },
+  disconnected: { color: '#ff4d4f', text: '未连接' },
+};
+
 export default function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
+  const [wsStatus, setWsStatus] = useState<WsStatus>(wsClient.status);
   const {
     token: { colorBgContainer },
   } = theme.useToken();
 
   const user = JSON.parse(localStorage.getItem('user') || 'null');
 
+  // WS 生命周期：已登录时连接，登出时断开
+  useEffect(() => {
+    if (localStorage.getItem('accessToken')) {
+      wsClient.connect();
+    }
+    const off = wsClient.onStatus(setWsStatus);
+    return () => {
+      off();
+      wsClient.disconnect();
+    };
+  }, []);
+
+  // storage 事件监听（401 拦截器刷新 token 后自动重连 WS）
+  const handleStorage = useCallback((e: StorageEvent) => {
+    if (e.key === 'accessToken' && e.newValue) {
+      wsClient.disconnect();
+      wsClient.connect();
+    }
+  }, []);
+  useEffect(() => {
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [handleStorage]);
+
   useEffect(() => {
     if (!localStorage.getItem('accessToken')) {
       navigate('/login', { replace: true });
     }
   }, [navigate]);
+
+  const handleLogout = async () => {
+    const rt = localStorage.getItem('refreshToken');
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: rt }),
+      });
+    } catch { /* ignore */ }
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('user');
+    navigate('/login', { replace: true });
+  };
 
   const menuItems = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' },
@@ -38,12 +83,6 @@ export default function MainLayout() {
     { key: '/kami', icon: <KeyOutlined />, label: '卡密池' },
     { key: '/orders', icon: <OrderedListOutlined />, label: '订单日志' },
   ];
-
-  const handleLogout = () => {
-    localStorage.removeItem('accessToken');
-    localStorage.removeItem('user');
-    navigate('/login', { replace: true });
-  };
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -77,8 +116,18 @@ export default function MainLayout() {
             display: 'flex',
             justifyContent: 'flex-end',
             alignItems: 'center',
+            gap: 16,
           }}
         >
+          <Tooltip title={statusMeta[wsStatus].text}>
+            <Badge
+              status={wsStatus === 'connected' ? 'success' : wsStatus === 'connecting' ? 'processing' : 'error'}
+            />
+            <WifiOutlined style={{ color: statusMeta[wsStatus].color }} />
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {statusMeta[wsStatus].text}
+            </Typography.Text>
+          </Tooltip>
           <Space>
             <Avatar icon={<UserOutlined />} />
             <Typography.Text>{user?.nickname || user?.username}</Typography.Text>

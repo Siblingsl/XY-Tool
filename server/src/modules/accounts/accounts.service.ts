@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { XianyuAccountEntity } from './account.entity';
 import { decrypt, encrypt } from '../../common/utils/crypto.util';
 import { isGoofishSessionExpired } from '../../goofish/goofish-error.util';
+import { RealtimeService } from '../realtime/realtime.service';
 
 /**
  * 闲鱼账号管理服务。
@@ -18,6 +19,7 @@ export class AccountsService {
     @InjectRepository(XianyuAccountEntity)
     private readonly repo: Repository<XianyuAccountEntity>,
     private readonly config: ConfigService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   /** 获取主密钥 */
@@ -189,7 +191,11 @@ export class AccountsService {
 
   /** 标记账号登录过期 */
   async markExpired(id: number): Promise<void> {
+    const account = await this.repo.findOne({ where: { id } });
     await this.repo.update(id, { status: 'expired', enabled: false });
     this.logger.warn(`账号登录过期: ${id}`);
+    if (account) {
+      this.realtime.pushAccountExpired(account.tenantId, id);
+    }
   }
 }

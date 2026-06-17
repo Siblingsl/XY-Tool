@@ -58,4 +58,34 @@ export class UsersService {
   async updateNickname(id: number, nickname: string): Promise<void> {
     await this.repo.update(id, { nickname });
   }
+
+  /** 写入 refresh token 的 bcrypt 哈希（登录/刷新时调用） */
+  async saveRefreshToken(id: number, refreshToken: string): Promise<void> {
+    const hash = await bcrypt.hash(refreshToken, 10);
+    await this.repo.update(id, { refreshTokenHash: hash });
+  }
+
+  /** 按 id 查询并带回 refreshTokenHash（校验 refresh 时用） */
+  async findByIdWithRefresh(id: number): Promise<UserEntity | null> {
+    return this.repo
+      .createQueryBuilder('u')
+      .addSelect('u.refreshTokenHash')
+      .where('u.id = :id', { id })
+      .getOne();
+  }
+
+  /** 校验 refresh token 哈希是否匹配 */
+  async verifyRefreshToken(
+    id: number,
+    refreshToken: string,
+  ): Promise<boolean> {
+    const user = await this.findByIdWithRefresh(id);
+    if (!user?.refreshTokenHash) return false;
+    return bcrypt.compare(refreshToken, user.refreshTokenHash);
+  }
+
+  /** 清除 refresh token 哈希（登出/吊销） */
+  async clearRefreshToken(id: number): Promise<void> {
+    await this.repo.update(id, { refreshTokenHash: null });
+  }
 }

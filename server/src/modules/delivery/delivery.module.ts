@@ -10,6 +10,7 @@ import { AccountsModule } from '../accounts/accounts.module';
 import { ProductsModule } from '../products/products.module';
 import { KamiPoolModule } from '../kami-pool/kami-pool.module';
 import { OrdersModule } from '../orders/orders.module';
+import { RealtimeModule } from '../realtime/realtime.module';
 
 /**
  * 发货模块。
@@ -25,6 +26,7 @@ import { OrdersModule } from '../orders/orders.module';
     ProductsModule,
     KamiPoolModule,
     OrdersModule,
+    RealtimeModule,
   ],
   providers: [DeliveryService, DeliverySchedulerService],
   controllers: [DeliveryController],

@@ -82,17 +82,26 @@ export class KamiPoolService {
    * 防止并发发货时同一条卡密被分配给多个订单（超发）。
    *
    * 流程：
-   *  1. 事务内 SELECT unused 卡密 FOR UPDATE
-   *  2. 标记为 locked + 设置超时时间
-   *  3. 返回卡密内容
-   *  4. 发货成功后外部调用 confirmItem() 标记为 used
-   *  5. 发货失败或超时后，定时任务释放 locked → unused
+   *  1. 校验 poolId 属于该租户
+   *  2. 事务内 SELECT unused 卡密 FOR UPDATE
+   *  3. 标记为 locked + 设置超时时间
+   *  4. 返回卡密内容
+   *  5. 发货成功后外部调用 confirmItem() 标记为 used
+   *  6. 发货失败或超时后，定时任务释放 locked → unused
    */
   async acquireItem(
     poolId: number,
     orderId: number,
+    tenantId: number,
     lockTimeoutMinutes = 5,
   ): Promise<KamiItemEntity | null> {
+    // 校验卡密池归属
+    const pool = await this.poolRepo.findOne({ where: { id: poolId, tenantId } });
+    if (!pool) {
+      this.logger.warn(`卡密池 ${poolId} 不存在或不属于租户 ${tenantId}`);
+      return null;
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();

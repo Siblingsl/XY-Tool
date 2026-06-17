@@ -11,7 +11,12 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main.js",
-    "lint": "eslint \"{src,apps,libs}/**/*.ts\" --fix"
+    "lint": "eslint \"{src,apps,libs}/**/*.ts\" --fix",
+    "migration:generate": "typeorm-ts-node-esm migration:generate -d src/data-source.ts",
+    "migration:create": "typeorm-ts-node-esm migration:create",
+    "migration:run": "typeorm-ts-node-esm migration:run -d src/data-source.ts",
+    "migration:revert": "typeorm-ts-node-esm migration:revert -d src/data-source.ts",
+    "migration:show": "typeorm-ts-node-esm migration:show -d src/data-source.ts"
   },
   "dependencies": {
     "@nestjs/bull": "^10.2.1",
@@ -21,8 +26,11 @@
     "@nestjs/jwt": "^10.2.0",
     "@nestjs/passport": "^10.0.3",
     "@nestjs/platform-express": "^10.4.15",
+    "@nestjs/platform-ws": "^10.4.22",
     "@nestjs/schedule": "^4.1.2",
+    "@nestjs/throttler": "^5.1.2",
     "@nestjs/typeorm": "^10.0.2",
+    "@nestjs/websockets": "^10.4.22",
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
     "bull": "^4.16.5",
