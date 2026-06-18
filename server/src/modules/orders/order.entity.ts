@@ -9,6 +9,11 @@ import { BaseEntity } from '../../common/entities/base.entity';
  * DELIVERED   已发货（消息已发送给买家）
  * FAILED      发货失败（达到最大重试次数）
  * IGNORED     忽略（无匹配商品规则，或手动跳过）
+ * REFUNDING   买家申请退款中（被动感知，不自动处置）
+ * REFUNDED    退款已完成（钱款已退，状态归档）
+ *
+ * 退款相关状态由 IM 消息 / mtop inRefund 字段被动识别，
+ * 系统不会主动同意或拒绝退款（闲鱼无开放处置 API）。
  */
 export type OrderStatus =
   | 'PENDING'
@@ -16,7 +21,9 @@ export type OrderStatus =
   | 'DELIVERING'
   | 'DELIVERED'
   | 'FAILED'
-  | 'IGNORED';
+  | 'IGNORED'
+  | 'REFUNDING'
+  | 'REFUNDED';
 
 /**
  * 订单表。

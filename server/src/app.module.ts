@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { BullModule } from '@nestjs/bull';
 import configuration from './config/configuration';
 import { EnvironmentVariables } from './config/env.validation';
 
@@ -15,7 +16,9 @@ import { ProductsModule } from './modules/products/products.module';
 import { KamiPoolModule } from './modules/kami-pool/kami-pool.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { DeliveryModule } from './modules/delivery/delivery.module';
+import { AlertModule } from './modules/alert/alert.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
+import { HealthModule } from './modules/health/health.module';
 import { SignModule } from './modules/sign/sign.module';
 import { XianyuModule } from './xianyu/xianyu.module';
 
@@ -78,9 +81,24 @@ import { XianyuModule } from './xianyu/xianyu.module';
       }),
     }),
 
+    // 3.6 任务队列（Bull）：发货等后台任务持久化 + 并发控制
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        redis: {
+          host: config.get<string>('redis.host'),
+          port: config.get<number>('redis.port'),
+          password: config.get<string>('redis.password') || undefined,
+        },
+      }),
+    }),
+
     // 4. 业务模块
+    AlertModule,    // 告警通道（必须先于依赖它的模块导入）
     XianyuModule,   // 协议层（mtop-client + 签名），单例，供各业务模块共享
     SignModule,
+    HealthModule,
     AuthModule,
     UsersModule,
     AccountsModule,

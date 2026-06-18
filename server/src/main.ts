@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WsAdapter } from '@nestjs/platform-ws';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { types } from 'pg';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
@@ -53,6 +54,21 @@ async function bootstrap() {
   app.useGlobalInterceptors(new TransformInterceptor());
 
   const port = config.get<number>('port') || 3000;
+
+  // 5. Swagger 文档（/api/docs）
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('闲鱼自动发货 API')
+    .setDescription('闲鱼虚拟产品自动发货工具 - 后端接口文档')
+    .setVersion('0.1.0')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT', name: 'Authorization' },
+      'access-token',
+    )
+    .build();
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/docs', app, document);
+  logger.log(`📚 Swagger 文档: http://localhost:${port}/api/docs`);
+
   await app.listen(port);
   logger.log(`🚀 后端服务已启动: http://localhost:${port}`);
   logger.log(

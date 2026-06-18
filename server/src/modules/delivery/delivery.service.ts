@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -14,6 +16,8 @@ import { GoofishMtopService } from '../../goofish/goofish-mtop.service';
 import { GOOFISH_UA } from '../../goofish/goofish.constants';
 import { handleAccountAuthError } from '../accounts/account-auth.util';
 import { RealtimeService } from '../realtime/realtime.service';
+import { AlertService } from '../alert/alert.service';
+import { DeliveryJobData } from './delivery.processor';
 
 /**
  * 发货执行引擎。
@@ -31,6 +35,8 @@ export class DeliveryService {
   private readonly STUCK_DELIVERING_MINUTES = 2;
 
   constructor(
+    @InjectQueue('delivery')
+    private readonly deliveryQueue: Queue<DeliveryJobData>,
     @InjectRepository(DeliveryLogEntity)
     private readonly logRepo: Repository<DeliveryLogEntity>,
     private readonly config: ConfigService,
@@ -41,6 +47,7 @@ export class DeliveryService {
     private readonly messageApi: MessageApi,
     private readonly goofishMtop: GoofishMtopService,
     private readonly realtime: RealtimeService,
+    private readonly alertService: AlertService,
   ) {}
 
   async processOrder(order: OrderEntity): Promise<{
@@ -237,13 +244,29 @@ export class DeliveryService {
     }
   }
 
-  /** 手动重试发货 */
+  /** 手动重试发货：入队走队列，保持账号串行 */
   async retryDeliver(
     orderId: number,
     tenantId: number,
   ): Promise<{ success: boolean; message: string }> {
-    const order = await this.ordersService.retryOrder(orderId, tenantId);
-    return this.processOrder(order);
+    // 先重置订单状态
+    await this.ordersService.retryOrder(orderId, tenantId);
+
+    const jobId = `delivery:${orderId}`;
+    // 如果队列中已有同订单任务，不重复入队
+    const existing = await this.deliveryQueue.getJob(jobId);
+    if (existing) {
+      const state = await existing.getState();
+      if (state === 'waiting' || state === 'active' || state === 'delayed') {
+        return { success: true, message: '任务已在队列中' };
+      }
+    }
+
+    await this.deliveryQueue.add(
+      { orderId, tenantId },
+      { jobId, attempts: 1, removeOnComplete: 100, removeOnFail: 50 },
+    );
+    return { success: true, message: '已重新入队' };
   }
 
   /**
@@ -361,10 +384,8 @@ export class DeliveryService {
         `订单 ${order.bizOrderId} 发货失败，${delayMs / 1000}s 后重试 (${order.retryCount + 1}/${this.MAX_RETRIES}): ${errorMsg}`,
       );
     } else {
-      await this.ordersService.markFailed(
-        order.id,
-        `重试 ${this.MAX_RETRIES} 次仍失败: ${errorMsg}`,
-      );
+      const failReason = `重试 ${this.MAX_RETRIES} 次仍失败: ${errorMsg}`;
+      await this.ordersService.markFailed(order.id, failReason);
       await this.writeLog(
         order,
         product,
@@ -375,6 +396,22 @@ export class DeliveryService {
         startTime,
       );
       this.logger.error(`订单 ${order.bizOrderId} 最终失败: ${errorMsg}`);
+
+      // 告警：最终失败
+      if (this.config.get<boolean>('alert.onFinalFailure', true)) {
+        this.alertService.send({
+          title: '发货最终失败',
+          text: [
+            `**订单号**: ${order.bizOrderId}`,
+            `**商品**: ${order.itemTitle || '-'}`,
+            `**账号**: ${order.accountId}`,
+            `**原因**: ${errorMsg}`,
+            `**时间**: ${new Date().toLocaleString('zh-CN')}`,
+          ].join('\n\n'),
+          severity: 'error',
+          tenantId: order.tenantId,
+        });
+      }
     }
   }
 

@@ -115,6 +115,41 @@ export class OrdersService {
     await this.updateStatus(id, 'IGNORED', { failReason: reason });
   }
 
+  /**
+   * 标记订单退款中（买家申请退款）。
+   * 仅被动感知记录，不主动处置退款。已发放的卡密不回收（避免重复使用）。
+   */
+  async markRefunding(id: number, reason?: string): Promise<void> {
+    const order = await this.repo.findOne({ where: { id } });
+    if (!order) return;
+    // 已退款终态不回退
+    if (order.status === 'REFUNDED') return;
+    await this.repo.update(id, {
+      status: 'REFUNDING',
+      failReason: reason ?? '买家申请退款',
+    });
+    this.logger.warn(`订单进入退款中: ${order.bizOrderId}`);
+    this.realtime.pushOrderStatus(order.tenantId, {
+      bizOrderId: order.bizOrderId,
+      status: 'REFUNDING',
+    });
+  }
+
+  /** 标记订单已退款（退款成功，状态归档） */
+  async markRefunded(id: number): Promise<void> {
+    const order = await this.repo.findOne({ where: { id } });
+    if (!order) return;
+    await this.repo.update(id, {
+      status: 'REFUNDED',
+      failReason: '退款已完成，钱款已原路退回',
+    });
+    this.logger.warn(`订单已退款: ${order.bizOrderId}`);
+    this.realtime.pushOrderStatus(order.tenantId, {
+      bizOrderId: order.bizOrderId,
+      status: 'REFUNDED',
+    });
+  }
+
   /** 记录重试 */
   async incrementRetry(id: number, nextRetryAt: Date): Promise<void> {
     const order = await this.repo.findOne({ where: { id } });

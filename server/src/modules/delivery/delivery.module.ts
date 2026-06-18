@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bull';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DeliveryLogEntity } from './delivery-log.entity';
 import { DeliveryService } from './delivery.service';
+import { DeliveryProcessor } from './delivery.processor';
 import { DeliverySchedulerService } from './delivery-scheduler.service';
 import { DeliveryController } from './delivery.controller';
 import { XianyuModule } from '../../xianyu/xianyu.module';
@@ -19,6 +21,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
  */
 @Module({
   imports: [
+    BullModule.registerQueue({ name: 'delivery' }),
     TypeOrmModule.forFeature([DeliveryLogEntity]),
     XianyuModule,
     GoofishModule,
@@ -28,8 +31,8 @@ import { RealtimeModule } from '../realtime/realtime.module';
     OrdersModule,
     RealtimeModule,
   ],
-  providers: [DeliveryService, DeliverySchedulerService],
+  providers: [DeliveryService, DeliveryProcessor, DeliverySchedulerService],
   controllers: [DeliveryController],
-  exports: [DeliveryService],
+  exports: [DeliveryService, BullModule],
 })
 export class DeliveryModule {}

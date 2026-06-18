@@ -8,6 +8,7 @@ import { Interval } from '@nestjs/schedule';
 import { AccountsService } from './accounts.service';
 import { GoofishMtopService } from '../../goofish/goofish-mtop.service';
 import { ImWebSocketService } from '../../goofish/im-websocket.service';
+import { AlertService } from '../alert/alert.service';
 import {
   handleAccountAuthError,
   registerAccountExpiredHandler,
@@ -26,6 +27,7 @@ export class CookieHealthService implements OnModuleInit {
     private readonly accounts: AccountsService,
     private readonly goofishMtop: GoofishMtopService,
     private readonly imWs: ImWebSocketService,
+    private readonly alertService: AlertService,
   ) {}
 
   onModuleInit(): void {
@@ -84,6 +86,20 @@ export class CookieHealthService implements OnModuleInit {
         accountId,
         new Error('FAIL_SYS_SESSION_EXPIRED'),
       );
+
+      if (this.config.get<boolean>('alert.onAccountExpired', true)) {
+        const account = await this.accounts.findByIdUnsafe(accountId);
+        this.alertService.send({
+          title: '闲鱼账号 Cookie 过期',
+          text: [
+            `**账号 ID**: ${accountId}`,
+            `**状态**: 已过期并自动禁用`,
+            `**时间**: ${new Date().toLocaleString('zh-CN')}`,
+          ].join('\n\n'),
+          severity: 'error',
+          tenantId: account?.tenantId,
+        });
+      }
     }
 
     if (!result.ok) {

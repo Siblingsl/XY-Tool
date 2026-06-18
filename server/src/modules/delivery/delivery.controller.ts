@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiProperty } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
@@ -17,16 +18,19 @@ import { IsNumber, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 
 class DeliveryLogQueryDto {
+  @ApiProperty({ description: '按订单ID过滤', required: false })
   @IsNumber()
   @IsOptional()
   @Type(() => Number)
   orderId?: number;
 
+  @ApiProperty({ description: '页码', required: false, default: 1 })
   @IsNumber()
   @IsOptional()
   @Type(() => Number)
   page?: number;
 
+  @ApiProperty({ description: '每页条数', required: false, default: 20 })
   @IsNumber()
   @IsOptional()
   @Type(() => Number)
@@ -36,6 +40,8 @@ class DeliveryLogQueryDto {
 /**
  * 发货日志与手动重试接口。
  */
+@ApiTags('发货')
+@ApiBearerAuth('access-token')
 @Controller('delivery')
 @UseGuards(JwtAuthGuard)
 export class DeliveryController {
@@ -46,6 +52,7 @@ export class DeliveryController {
   ) {}
 
   @Get('logs')
+  @ApiOperation({ summary: '发货日志列表（分页，可按 orderId 过滤）' })
   async listLogs(
     @CurrentUser() user: JwtPayload,
     @Query() query: DeliveryLogQueryDto,
@@ -64,8 +71,8 @@ export class DeliveryController {
     return { list, total, page, size };
   }
 
-  /** POST /api/delivery/retry/:orderId  手动重试发货 */
   @Post('retry/:orderId')
+  @ApiOperation({ summary: '手动重试发货', description: '仅 FAILED/PENDING/IGNORED 状态可重试' })
   retryDeliver(
     @CurrentUser() user: JwtPayload,
     @Param('orderId') orderId: string,

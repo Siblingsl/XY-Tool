@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
@@ -57,6 +57,42 @@ export class UsersService {
 
   async updateNickname(id: number, nickname: string): Promise<void> {
     await this.repo.update(id, { nickname });
+  }
+
+  /**
+   * 修改密码。
+   * 校验旧密码 → 哈希新密码 → 写库 → 吊销所有 refresh token（强制重新登录）。
+   * @throws BadRequestException 旧密码错误
+   */
+  async updatePassword(
+    id: number,
+    oldPassword: string,
+    newPassword: string,
+  ): Promise<void> {
+    const user = await this.findByUsernameForId(id);
+    if (!user) {
+      throw new BadRequestException('用户不存在');
+    }
+    const ok = await this.verifyPassword(oldPassword, user.password);
+    if (!ok) {
+      throw new BadRequestException('旧密码错误');
+    }
+    if (oldPassword === newPassword) {
+      throw new BadRequestException('新密码不能与旧密码相同');
+    }
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await this.repo.update(id, { password: hashed });
+    // 吊销旧会话：改密后所有已签发的 refresh token 失效
+    await this.clearRefreshToken(id);
+  }
+
+  /** 按 id 查询并带回密码（改密校验旧密码用） */
+  private async findByUsernameForId(id: number): Promise<UserEntity | null> {
+    return this.repo
+      .createQueryBuilder('u')
+      .addSelect('u.password')
+      .where('u.id = :id', { id })
+      .getOne();
   }
 
   /** 写入 refresh token 的 bcrypt 哈希（登录/刷新时调用） */

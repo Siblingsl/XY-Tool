@@ -279,7 +279,10 @@ export class GoofishMtopService {
 
     const bizOrderId = String(common.orderId ?? '');
     if (!bizOrderId) return null;
-    if (common.inRefund === 'true') return null;
+    // 退款中的订单不再直接丢弃：标记 inRefund=true 返回，
+    // 由上游 OrderPollingService 决定是否建单并标记 REFUNDING 状态，
+    // 避免退款订单在拉单时彻底消失、无法感知。
+    const inRefund = common.inRefund === 'true';
 
     const totalPrice = String(priceVo.totalPrice ?? '0');
     let amountCents = 0;
@@ -306,6 +309,7 @@ export class GoofishMtopService {
       buyerId: buyerInfo.buyerId ? String(buyerInfo.buyerId) : undefined,
       amount: amountCents,
       tradeStatus: String(common.orderStatus ?? ''),
+      inRefund,
       orderCreatedAt,
     };
   }
@@ -319,5 +323,7 @@ export interface ParsedSoldOrder {
   buyerId?: string;
   amount?: number;
   tradeStatus?: string;
+  /** 是否处于退款中（mtop commonData.inRefund === 'true'） */
+  inRefund?: boolean;
   orderCreatedAt?: Date;
 }

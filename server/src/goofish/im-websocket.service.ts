@@ -15,7 +15,9 @@ import {
   parseChatMessage,
   parsePushFromSdkBody,
   PaymentMessageEvent,
+  RefundMessageEvent,
   tryParsePaymentEvent,
+  tryParseRefundEvent,
 } from './goofish-ws-message.util';
 import { GoofishMtopService } from './goofish-mtop.service';
 import { GoofishSdkService } from './goofish-sdk.service';
@@ -32,6 +34,8 @@ export interface ImListenerOptions {
   cookie: string;
   onCookieUpdate?: (cookie: string) => Promise<void>;
   onPaymentMessage?: (event: PaymentMessageEvent) => Promise<void>;
+  /** 退款消息回调（买家申请退款 / 退款成功） */
+  onRefundMessage?: (event: RefundMessageEvent) => Promise<void>;
   /** Cookie 会话失效时回调（应 markExpired + 停止监听） */
   onAuthError?: (error: unknown) => Promise<void>;
 }
@@ -61,6 +65,7 @@ interface AccountImConnection {
   listenerMode: boolean;
   onCookieUpdate?: (cookie: string) => Promise<void>;
   onPaymentMessage?: (event: PaymentMessageEvent) => Promise<void>;
+  onRefundMessage?: (event: RefundMessageEvent) => Promise<void>;
   onAuthError?: (error: unknown) => Promise<void>;
   processedMessageIds: Map<string, number>;
   stopped: boolean;
@@ -113,6 +118,7 @@ export class ImWebSocketService implements OnModuleDestroy {
       listenerMode: true,
       onCookieUpdate: options.onCookieUpdate,
       onPaymentMessage: options.onPaymentMessage,
+      onRefundMessage: options.onRefundMessage,
       onAuthError: options.onAuthError,
       processedMessageIds: new Map(),
       stopped: false,
@@ -426,15 +432,27 @@ export class ImWebSocketService implements OnModuleDestroy {
     if (conn.processedMessageIds.has(msgId)) return;
     conn.processedMessageIds.set(msgId, Date.now());
 
-    const event = tryParsePaymentEvent(parsed, conn.myUserId);
-    if (!event) return;
+    // 1. 付款消息
+    const payEvent = tryParsePaymentEvent(parsed, conn.myUserId);
+    if (payEvent) {
+      this.logger.log(
+        `[${conn.accountKey}] 检测到付款消息: order=${payEvent.bizOrderId} item=${payEvent.itemId} buyer=${payEvent.buyerId}`,
+      );
+      if (conn.onPaymentMessage) {
+        await conn.onPaymentMessage(payEvent);
+      }
+      return;
+    }
 
-    this.logger.log(
-      `[${conn.accountKey}] 检测到付款消息: order=${event.bizOrderId} item=${event.itemId} buyer=${event.buyerId}`,
-    );
-
-    if (conn.onPaymentMessage) {
-      await conn.onPaymentMessage(event);
+    // 2. 退款消息（被动感知，不主动处置）
+    if (conn.onRefundMessage) {
+      const refundEvent = tryParseRefundEvent(parsed, conn.myUserId);
+      if (refundEvent) {
+        this.logger.log(
+          `[${conn.accountKey}] 检测到退款消息: order=${refundEvent.bizOrderId} done=${refundEvent.done} content=${refundEvent.content}`,
+        );
+        await conn.onRefundMessage(refundEvent);
+      }
     }
   }
 

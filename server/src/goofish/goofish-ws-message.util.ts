@@ -9,6 +9,24 @@ export const PAID_ORDER_MESSAGES = new Set([
   '[已付款，待发货]',
 ]);
 
+/**
+ * 退款相关系统消息（xianyu-auto-reply 同款模板）。
+ * 用于被动感知退款事件：买家申请退款 / 卖家同意 / 退款成功。
+ * 仅识别 + 记录状态，无法主动处置退款（闲鱼无开放 API）。
+ */
+export const REFUND_MESSAGES = new Set([
+  '[买家申请退款]',
+  '[卖家同意退款]',
+  '[退款成功，钱款已原路退返]',
+  '[退款成功，钱款已原路退回]',
+]);
+
+/** 退款成功的终态消息（触发 REFUNDED） */
+export const REFUND_DONE_MESSAGES = new Set([
+  '[退款成功，钱款已原路退返]',
+  '[退款成功，钱款已原路退回]',
+]);
+
 export interface ParsedImChatMessage {
   sendUserId: string;
   sendUserName: string;
@@ -25,6 +43,21 @@ export interface PaymentMessageEvent {
   itemId: string;
   conversationId: string;
   content: string;
+  rawMessage: Record<string, unknown>;
+}
+
+/**
+ * 退款事件。done=true 表示退款已成功（REFUNDED），
+ * false 表示退款流程进行中（REFUNDING）。
+ */
+export interface RefundMessageEvent {
+  bizOrderId: string;
+  buyerId: string;
+  buyerNick?: string;
+  itemId: string;
+  conversationId: string;
+  content: string;
+  done: boolean;
   rawMessage: Record<string, unknown>;
 }
 
@@ -276,6 +309,33 @@ export function tryParsePaymentEvent(
     itemId: parsed.itemId,
     conversationId: parsed.conversationId,
     content: parsed.content,
+    rawMessage: parsed.rawMessage,
+  };
+}
+
+/**
+ * 解析退款事件。
+ * - content 命中 REFUND_MESSAGES 且来自买家 → 返回事件
+ * - done=true 表示退款已成功（REFUND_DONE_MESSAGES），false 表示退款中
+ */
+export function tryParseRefundEvent(
+  parsed: ParsedImChatMessage,
+  sellerUserId: string,
+): RefundMessageEvent | null {
+  if (!REFUND_MESSAGES.has(parsed.content)) return null;
+  // 系统消息 sendUserId 可能是买家或系统，此处不严格过滤 seller
+  // （退款消息也可能是卖家自己触发，但 bizOrderId 才是关键）
+  const bizOrderId = extractOrderId(parsed.rawMessage);
+  if (!bizOrderId) return null;
+
+  return {
+    bizOrderId,
+    buyerId: parsed.sendUserId,
+    buyerNick: parsed.sendUserName,
+    itemId: parsed.itemId,
+    conversationId: parsed.conversationId,
+    content: parsed.content,
+    done: REFUND_DONE_MESSAGES.has(parsed.content),
     rawMessage: parsed.rawMessage,
   };
 }

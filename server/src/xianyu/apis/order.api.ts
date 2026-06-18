@@ -13,6 +13,8 @@ export interface XianyuOrder {
   buyerId?: string;
   amount?: number;
   tradeStatus?: string;
+  /** 是否处于退款中（mtop commonData.inRefund === 'true'） */
+  inRefund?: boolean;
   createTime?: number;
 }
 
@@ -53,6 +55,7 @@ export class OrderApi {
           buyerId: o.buyerId,
           amount: o.amount,
           tradeStatus: o.tradeStatus,
+          inRefund: o.inRefund,
           createTime: o.orderCreatedAt?.getTime(),
         })),
         hasNext,

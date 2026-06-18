@@ -10,14 +10,21 @@ import { AccountsService } from '../accounts/accounts.service';
 import { OrdersService } from './orders.service';
 import { ImWebSocketService } from '../../goofish/im-websocket.service';
 import { GoofishMtopService } from '../../goofish/goofish-mtop.service';
-import { PaymentMessageEvent } from '../../goofish/goofish-ws-message.util';
+import {
+  PaymentMessageEvent,
+  RefundMessageEvent,
+} from '../../goofish/goofish-ws-message.util';
 import { handleAccountAuthError } from '../accounts/account-auth.util';
+import { AlertService } from '../alert/alert.service';
 
 /**
  * WS 付款消息监听器。
  *
  * 参考 xianyu-auto-reply：买家付款后 IM 会推送
  * 「[我已付款，等待你发货]」等系统消息，比轮询更快。
+ *
+ * 同时监听退款消息（[买家申请退款] / [退款成功...]），
+ * 被动感知退款事件并更新订单状态（不主动处置退款）。
  */
 @Injectable()
 export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
@@ -30,6 +37,7 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
     private readonly ordersService: OrdersService,
     private readonly imWs: ImWebSocketService,
     private readonly goofishMtop: GoofishMtopService,
+    private readonly alertService: AlertService,
   ) {}
 
   private get enabled(): boolean {
@@ -103,6 +111,12 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
               event,
               cookie,
             ),
+          onRefundMessage: (event) =>
+            this.handleRefundMessage(
+              account.id,
+              account.tenantId,
+              event,
+            ),
         });
         this.activeAccountIds.add(account.id);
       } catch (err) {
@@ -162,5 +176,42 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
     if (created) {
       this.logger.log(`WS 付款建单: ${event.bizOrderId} (${itemTitle})`);
     }
+  }
+
+  /**
+   * 处理退款消息：把订单标记为 REFUNDING / REFUNDED 并推告警。
+   * 退款订单不会卡密回收（避免卡密被重复使用）。
+   */
+  private async handleRefundMessage(
+    accountId: number,
+    tenantId: number,
+    event: RefundMessageEvent,
+  ): Promise<void> {
+    this.logger.log(
+      `WS 退款消息: order=${event.bizOrderId} done=${event.done} content=${event.content}`,
+    );
+
+    const order = await this.ordersService.findByBizOrderId(event.bizOrderId);
+    if (!order) {
+      // 退款消息可能先于付款建单到达（罕见），记录告警即可
+      this.logger.warn(
+        `退款消息无对应订单: ${event.bizOrderId}，跳过状态更新`,
+      );
+      return;
+    }
+
+    if (event.done) {
+      await this.ordersService.markRefunded(order.id);
+    } else {
+      await this.ordersService.markRefunding(order.id, event.content);
+    }
+
+    // 推送告警通知人工关注
+    await this.alertService.send({
+      title: event.done ? '订单已退款' : '买家申请退款',
+      text: `订单 ${event.bizOrderId}（${order.itemTitle}）\n买家：${order.buyerNick || event.buyerId || '-'}\n消息：${event.content}`,
+      severity: 'warn',
+      tenantId,
+    });
   }
 }

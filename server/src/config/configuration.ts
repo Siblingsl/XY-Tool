@@ -99,4 +99,26 @@ export default () => ({
     ttl: parseInt(process.env.THROTTLE_TTL || '60000', 10),
     limit: parseInt(process.env.THROTTLE_LIMIT || '120', 10),
   },
+
+  /**
+   * 告警通道配置。
+   * 当发货失败 / 账号过期 / 库存不足 / 订单卡住时推送到外部 IM。
+   * - dingtalk: Webhook URL（可选加签 secret）
+   * - wechat: 企业微信机器人 Webhook URL
+   * 至少配置一个通道告警才能生效。
+   */
+  alert: {
+    enabled: process.env.ALERT_ENABLED !== 'false',
+    dingtalk: {
+      webhook: process.env.ALERT_DINGTALK_WEBHOOK || '',
+      secret: process.env.ALERT_DINGTALK_SECRET || '',
+    },
+    wechat: {
+      webhook: process.env.ALERT_WECHAT_WEBHOOK || '',
+    },
+    onFinalFailure: process.env.ALERT_ON_FINAL_FAILURE !== 'false',
+    onAccountExpired: process.env.ALERT_ON_ACCOUNT_EXPIRED !== 'false',
+    onLowStock: process.env.ALERT_ON_LOW_STOCK !== 'false',
+    onStuckOrders: process.env.ALERT_ON_STUCK_ORDERS !== 'false',
+  },
 });

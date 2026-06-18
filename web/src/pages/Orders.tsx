@@ -80,6 +80,8 @@ export default function Orders() {
     DELIVERED: 'success',
     FAILED: 'error',
     IGNORED: 'default',
+    REFUNDING: 'orange',
+    REFUNDED: 'volcano',
   };
 
   const orderColumns = [

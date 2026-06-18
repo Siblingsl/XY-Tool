@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
- * 初始 schema：与 src/modules/ 下所有 entity 文件的字段、索引一一对应。
+ * 初始 schema：与 src/modules 下所有 entity 文件的字段、索引一一对应。
  *
  * 适用于全新数据库首次部署。若已存在由 synchronize 生成的库，
  * 应改用 migration:generate 基于现状 diff 生成对齐迁移，而不是直接跑此文件。

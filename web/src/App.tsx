@@ -6,6 +6,7 @@ import Accounts from './pages/Accounts';
 import Products from './pages/Products';
 import KamiPool from './pages/KamiPool';
 import Orders from './pages/Orders';
+import Profile from './pages/Profile';
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="products" element={<Products />} />
           <Route path="kami" element={<KamiPool />} />
           <Route path="orders" element={<Orders />} />
+          <Route path="profile" element={<Profile />} />
         </Route>
       </Routes>
     </BrowserRouter>

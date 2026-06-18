@@ -112,7 +112,7 @@ export class OrderPollingService {
             continue;
           }
 
-          const { created } = await this.ordersService.createIfNotExists({
+          const { created, order } = await this.ordersService.createIfNotExists({
             tenantId: account.tenantId,
             accountId: account.id,
             bizOrderId: o.bizOrderId,
@@ -128,6 +128,14 @@ export class OrderPollingService {
           if (created) {
             this.logger.log(
               `真实订单入库: ${o.bizOrderId} (${o.itemTitle})`,
+            );
+          }
+
+          // 退款中的订单标记为 REFUNDING（被动感知，不丢弃）
+          if (o.inRefund && order.status !== 'REFUNDED') {
+            await this.ordersService.markRefunding(
+              order.id,
+              'mtop 检测到订单处于退款中',
             );
           }
         }

@@ -186,6 +186,15 @@ export class KamiPoolService {
     return count;
   }
 
+  /** 获取有卡密池的所有租户 ID */
+  async getAllPoolTenants(): Promise<number[]> {
+    const rows = await this.poolRepo
+      .createQueryBuilder('p')
+      .select('DISTINCT p.tenantId', 'tenantId')
+      .getRawMany();
+    return rows.map((r) => Number(r.tenantId));
+  }
+
   /**
    * 检查低库存预警。
    * 返回低于阈值的卡密池列表。
