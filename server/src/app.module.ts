@@ -19,6 +19,10 @@ import { DeliveryModule } from './modules/delivery/delivery.module';
 import { AlertModule } from './modules/alert/alert.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
 import { HealthModule } from './modules/health/health.module';
+import { StatsModule } from './modules/stats/stats.module';
+import { AdminModule } from './modules/admin/admin.module';
+import { RedisModule } from './modules/redis/redis.module';
+import { AutoReplyModule } from './modules/auto-reply/auto-reply.module';
 import { SignModule } from './modules/sign/sign.module';
 import { XianyuModule } from './xianyu/xianyu.module';
 
@@ -96,6 +100,7 @@ import { XianyuModule } from './xianyu/xianyu.module';
 
     // 4. 业务模块
     AlertModule,    // 告警通道（必须先于依赖它的模块导入）
+    RedisModule,    // 全局 Redis（对话上下文/人工接管/冷却）
     XianyuModule,   // 协议层（mtop-client + 签名），单例，供各业务模块共享
     SignModule,
     HealthModule,
@@ -107,6 +112,9 @@ import { XianyuModule } from './xianyu/xianyu.module';
     OrdersModule,
     DeliveryModule,
     RealtimeModule,
+    StatsModule,
+    AdminModule,
+    AutoReplyModule,
   ],
   providers: [
     // 全局限流守卫：未显式 @SkipThrottle() 的路由都会被限流

@@ -9,6 +9,7 @@ import {
   LogoutOutlined,
   WifiOutlined,
   SettingOutlined,
+  MessageOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { wsClient, type WsStatus } from '../api/ws';
@@ -83,6 +84,7 @@ export default function MainLayout() {
     { key: '/products', icon: <ShoppingOutlined />, label: '商品规则' },
     { key: '/kami', icon: <KeyOutlined />, label: '卡密池' },
     { key: '/orders', icon: <OrderedListOutlined />, label: '订单日志' },
+    { key: '/auto-reply', icon: <MessageOutlined />, label: '自动回复' },
     { key: '/profile', icon: <SettingOutlined />, label: '个人中心' },
   ];
 

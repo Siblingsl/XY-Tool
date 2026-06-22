@@ -13,9 +13,11 @@ import { GoofishMtopService } from '../../goofish/goofish-mtop.service';
 import {
   PaymentMessageEvent,
   RefundMessageEvent,
+  ChatMessageEvent,
 } from '../../goofish/goofish-ws-message.util';
 import { handleAccountAuthError } from '../accounts/account-auth.util';
 import { AlertService } from '../alert/alert.service';
+import { AutoReplyService } from '../auto-reply/auto-reply.service';
 
 /**
  * WS 付款消息监听器。
@@ -38,6 +40,7 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
     private readonly imWs: ImWebSocketService,
     private readonly goofishMtop: GoofishMtopService,
     private readonly alertService: AlertService,
+    private readonly autoReplyService: AutoReplyService,
   ) {}
 
   private get enabled(): boolean {
@@ -116,6 +119,13 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
               account.id,
               account.tenantId,
               event,
+            ),
+          onChatMessage: (event) =>
+            this.handleChatMessage(
+              account.id,
+              account.tenantId,
+              event,
+              cookie,
             ),
         });
         this.activeAccountIds.add(account.id);
@@ -213,5 +223,19 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
       severity: 'warn',
       tenantId,
     });
+  }
+
+  /**
+   * 处理普通聊天消息：转交自动回复引擎（关键词/默认/AI）。
+   * 由 im-websocket 的 onChatMessage 回调触发。
+   * cookie 用于发送回复（可能被续期）。
+   */
+  private async handleChatMessage(
+    accountId: number,
+    tenantId: number,
+    event: ChatMessageEvent,
+    cookie: string,
+  ): Promise<void> {
+    await this.autoReplyService.handle(accountId, tenantId, event, cookie);
   }
 }

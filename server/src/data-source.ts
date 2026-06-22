@@ -7,6 +7,11 @@ import { ProductEntity } from './modules/products/product.entity';
 import { KamiPoolEntity, KamiItemEntity } from './modules/kami-pool/kami-pool.entity';
 import { OrderEntity } from './modules/orders/order.entity';
 import { DeliveryLogEntity } from './modules/delivery/delivery-log.entity';
+import {
+  ReplyKeywordEntity,
+  ReplyConfigEntity,
+  ReplyHandoffEntity,
+} from './modules/auto-reply/entities/reply.entities';
 
 /**
  * TypeORM DataSource 独立实例。
@@ -39,6 +44,9 @@ export const AppDataSource = new DataSource({
     KamiItemEntity,
     OrderEntity,
     DeliveryLogEntity,
+    ReplyKeywordEntity,
+    ReplyConfigEntity,
+    ReplyHandoffEntity,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   migrationsTableName: 'typeorm_migrations',

@@ -13,8 +13,10 @@ import {
   Table,
   Tag,
   Typography,
+  Image,
+  Empty,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import api from '../api';
 
 /**
@@ -28,6 +30,14 @@ export default function Products() {
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
+
+  // 拉取在售商品弹窗状态
+  const [fetchModalOpen, setFetchModalOpen] = useState(false);
+  const [fetchAccountId, setFetchAccountId] = useState<number | undefined>();
+  const [fetchItems, setFetchItems] = useState<any[]>([]);
+  const [fetchPage, setFetchPage] = useState(1);
+  const [fetchHasNext, setFetchHasNext] = useState(false);
+  const [fetchLoading, setFetchLoading] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -83,6 +93,62 @@ export default function Products() {
     }
   };
 
+  // ============ 拉取在售商品 ============
+
+  const fetchItemsPage = async (accountId: number, page = 1, append = false) => {
+    setFetchLoading(true);
+    try {
+      const res: any = await api.get(`/accounts/${accountId}/items`, {
+        params: { page, size: 20 },
+      });
+      const newList = res?.list || [];
+      setFetchItems(append ? [...fetchItems, ...newList] : newList);
+      setFetchPage(page);
+      setFetchHasNext(!!res?.hasNext);
+    } catch (e) {
+      message.error((e as Error).message);
+      if (!append) setFetchItems([]);
+    } finally {
+      setFetchLoading(false);
+    }
+  };
+
+  const openFetchModal = () => {
+    setFetchItems([]);
+    setFetchPage(1);
+    setFetchHasNext(false);
+    setFetchModalOpen(true);
+    // 默认选第一个账号并拉取
+    if (accounts.length > 0 && fetchAccountId == null) {
+      const firstId = accounts[0].id;
+      setFetchAccountId(firstId);
+      fetchItemsPage(firstId, 1);
+    } else if (fetchAccountId != null) {
+      fetchItemsPage(fetchAccountId, 1);
+    }
+  };
+
+  const handleFetchAccountChange = (id: number) => {
+    setFetchAccountId(id);
+    fetchItemsPage(id, 1);
+  };
+
+  /** 把在售商品导入为发货规则：自动填 itemId/title，打开规则表单 */
+  const handleImportToRule = (item: any) => {
+    form.setFieldsValue({
+      itemId: item.itemId,
+      title: item.title,
+      accountId: fetchAccountId,
+      deliveryType: undefined,
+      kamiPoolId: undefined,
+      fixedContent: undefined,
+      remark: undefined,
+    });
+    setFetchModalOpen(false);
+    setModalOpen(true);
+    message.success(`已填入「${item.title}」，请补全发货方式`);
+  };
+
   const deliveryTypeText: Record<string, string> = {
     kami: '发卡密',
     link: '发链接',
@@ -125,6 +191,13 @@ export default function Products() {
           <Space>
             <Button icon={<ReloadOutlined />} onClick={refresh}>
               刷新
+            </Button>
+            <Button
+              icon={<CloudDownloadOutlined />}
+              onClick={openFetchModal}
+              disabled={accounts.length === 0}
+            >
+              从闲鱼拉取商品
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
               添加规则
@@ -188,6 +261,112 @@ export default function Products() {
             <Input.TextArea rows={2} placeholder="如：有问题联系客服" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 拉取在售商品弹窗 */}
+      <Modal
+        title="从闲鱼拉取在售商品"
+        open={fetchModalOpen}
+        onCancel={() => setFetchModalOpen(false)}
+        footer={<Button onClick={() => setFetchModalOpen(false)}>关闭</Button>}
+        width={800}
+        destroyOnClose
+      >
+        <Space style={{ marginBottom: 16, width: '100%' }} direction="vertical">
+          <Select
+            placeholder="选择闲鱼账号"
+            style={{ width: 280 }}
+            value={fetchAccountId}
+            onChange={handleFetchAccountChange}
+            options={accounts.map((a) => ({ value: a.id, label: a.nickname }))}
+          />
+        </Space>
+        <Table
+          size="small"
+          rowKey="itemId"
+          dataSource={fetchItems}
+          loading={fetchLoading}
+          pagination={false}
+          scroll={{ y: 360 }}
+          locale={{
+            emptyText: fetchLoading ? '加载中...' : <Empty description="暂无在售商品" />,
+          }}
+          columns={[
+            {
+              title: '商品',
+              dataIndex: 'title',
+              ellipsis: true,
+              render: (title: string, row: any) => (
+                <Space>
+                  {row.picUrl ? (
+                    <Image
+                      src={row.picUrl}
+                      width={36}
+                      height={36}
+                      style={{ borderRadius: 4, objectFit: 'cover' }}
+                      fallback="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E"
+                    />
+                  ) : null}
+                  <a href={row.detailUrl} target="_blank" rel="noreferrer">
+                    {title}
+                  </a>
+                </Space>
+              ),
+            },
+            {
+              title: '商品ID',
+              dataIndex: 'itemId',
+              width: 140,
+              render: (v: string) => (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {v}
+                </Typography.Text>
+              ),
+            },
+            {
+              title: '价格',
+              dataIndex: 'priceText',
+              width: 90,
+              render: (p: string, row: any) => p || (row.price ? `¥${(row.price / 100).toFixed(2)}` : '-'),
+            },
+            {
+              title: '状态',
+              dataIndex: 'status',
+              width: 80,
+              render: (s: string) => (
+                <Tag color={s === '在售' ? 'success' : 'default'}>{s}</Tag>
+              ),
+            },
+            {
+              title: '操作',
+              width: 110,
+              render: (_: any, row: any) => (
+                <Button
+                  size="small"
+                  type="link"
+                  onClick={() => handleImportToRule(row)}
+                >
+                  导入为规则
+                </Button>
+              ),
+            },
+          ]}
+        />
+        {fetchHasNext && (
+          <div style={{ textAlign: 'center', marginTop: 12 }}>
+            <Button
+              loading={fetchLoading}
+              onClick={() =>
+                fetchAccountId && fetchItemsPage(fetchAccountId, fetchPage + 1, true)
+              }
+            >
+              加载更多
+            </Button>
+          </div>
+        )}
+        <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0, fontSize: 12 }}>
+          实时从闲鱼拉取在售商品，点击「导入为规则」可自动填入商品ID和标题，无需手动输入。
+        </Typography.Paragraph>
       </Modal>
     </div>
   );

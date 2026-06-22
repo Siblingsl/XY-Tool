@@ -16,8 +16,10 @@ import {
   parsePushFromSdkBody,
   PaymentMessageEvent,
   RefundMessageEvent,
+  ChatMessageEvent,
   tryParsePaymentEvent,
   tryParseRefundEvent,
+  tryParseChatMessage,
 } from './goofish-ws-message.util';
 import { GoofishMtopService } from './goofish-mtop.service';
 import { GoofishSdkService } from './goofish-sdk.service';
@@ -36,6 +38,8 @@ export interface ImListenerOptions {
   onPaymentMessage?: (event: PaymentMessageEvent) => Promise<void>;
   /** 退款消息回调（买家申请退款 / 退款成功） */
   onRefundMessage?: (event: RefundMessageEvent) => Promise<void>;
+  /** 普通聊天消息回调（用于自动回复：关键词/默认/AI） */
+  onChatMessage?: (event: ChatMessageEvent) => Promise<void>;
   /** Cookie 会话失效时回调（应 markExpired + 停止监听） */
   onAuthError?: (error: unknown) => Promise<void>;
 }
@@ -66,6 +70,7 @@ interface AccountImConnection {
   onCookieUpdate?: (cookie: string) => Promise<void>;
   onPaymentMessage?: (event: PaymentMessageEvent) => Promise<void>;
   onRefundMessage?: (event: RefundMessageEvent) => Promise<void>;
+  onChatMessage?: (event: ChatMessageEvent) => Promise<void>;
   onAuthError?: (error: unknown) => Promise<void>;
   processedMessageIds: Map<string, number>;
   stopped: boolean;
@@ -119,6 +124,7 @@ export class ImWebSocketService implements OnModuleDestroy {
       onCookieUpdate: options.onCookieUpdate,
       onPaymentMessage: options.onPaymentMessage,
       onRefundMessage: options.onRefundMessage,
+      onChatMessage: options.onChatMessage,
       onAuthError: options.onAuthError,
       processedMessageIds: new Map(),
       stopped: false,
@@ -452,6 +458,18 @@ export class ImWebSocketService implements OnModuleDestroy {
           `[${conn.accountKey}] 检测到退款消息: order=${refundEvent.bizOrderId} done=${refundEvent.done} content=${refundEvent.content}`,
         );
         await conn.onRefundMessage(refundEvent);
+        return;
+      }
+    }
+
+    // 3. 普通聊天消息（自动回复：关键词/默认/AI）
+    if (conn.onChatMessage) {
+      const chatEvent = tryParseChatMessage(parsed, conn.myUserId);
+      if (chatEvent) {
+        this.logger.debug(
+          `[${conn.accountKey}] 收到聊天消息: buyer=${chatEvent.buyerId} content=${chatEvent.content.slice(0, 30)}`,
+        );
+        await conn.onChatMessage(chatEvent);
       }
     }
   }

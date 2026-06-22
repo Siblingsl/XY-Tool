@@ -85,6 +85,16 @@ export default () => ({
     ),
   },
 
+  /**
+   * Cookie 长登录保活（hasLogin.do 接口续期）。
+   * 解决扫码登录一天就过期：定时刷新核心登录态，延长到 7-30 天。
+   * 仅 goofish 签名模式生效。
+   */
+  cookieRenew: {
+    enabled: process.env.COOKIE_RENEW_ENABLED !== 'false',
+    cron: process.env.COOKIE_RENEW_CRON || '0 */6 * * *',
+  },
+
   /** 虚拟商品 IM 发送后是否调用闲鱼「确认发货」 */
   delivery: {
     confirmEnabled: String(process.env.CONFIRM_DELIVERY_ENABLED) === 'true',

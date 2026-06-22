@@ -9,6 +9,7 @@ import { AccountsModule } from '../accounts/accounts.module';
 import { XianyuModule } from '../../xianyu/xianyu.module';
 import { GoofishModule } from '../../goofish/goofish.module';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { AutoReplyModule } from '../auto-reply/auto-reply.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     XianyuModule,
     GoofishModule,
     RealtimeModule,
+    AutoReplyModule,
   ],
   providers: [OrdersService, OrderPollingService, ImPaymentListenerService],
   controllers: [OrdersController],

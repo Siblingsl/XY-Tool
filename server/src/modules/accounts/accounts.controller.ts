@@ -3,19 +3,26 @@ import {
   Controller,
   Delete,
   Get,
+  HttpException,
+  HttpStatus,
   NotFoundException,
   Param,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiProperty } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import { AccountsService } from './accounts.service';
 import { QrLoginService } from './qr-login.service';
 import { CookieHealthService } from './cookie-health.service';
+import { CookieRenewService } from './cookie-renew.service';
+import { GoofishMtopService } from '../../goofish/goofish-mtop.service';
+import { handleAccountAuthError } from './account-auth.util';
 import {
   IsInt,
   IsOptional,
@@ -25,7 +32,7 @@ import {
   MinLength,
   MaxLength,
 } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 
 /** 新增账号 DTO */
 export class CreateAccountDto {
@@ -72,6 +79,21 @@ export class SetAccountEnabledDto {
   enabled: boolean;
 }
 
+/** 拉取在售商品分页 DTO */
+export class ItemsQueryDto {
+  @ApiProperty({ description: '页码（从1开始）', required: false, default: 1 })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  page?: number;
+
+  @ApiProperty({ description: '每页条数', required: false, default: 20, maximum: 50 })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  size?: number;
+}
+
 /**
  * 闲鱼账号管理接口。
  * 所有接口需要 JWT 登录态，且数据按 tenantId 隔离。
@@ -85,6 +107,9 @@ export class AccountsController {
     private readonly service: AccountsService,
     private readonly qrLogin: QrLoginService,
     private readonly cookieHealth: CookieHealthService,
+    private readonly cookieRenew: CookieRenewService,
+    private readonly goofishMtop: GoofishMtopService,
+    private readonly config: ConfigService,
   ) {}
 
   @Get()
@@ -164,6 +189,76 @@ export class AccountsController {
       throw new NotFoundException('账号不存在');
     }
     return this.cookieHealth.checkOne(Number(id));
+  }
+
+  /**
+   * POST /api/accounts/:id/renew
+   * 手动触发 Cookie 长登录保活（调用 hasLogin.do 续期核心登录态）。
+   * 解决扫码登录一天就过期的问题。
+   */
+  @Post(':id/renew')
+  @ApiOperation({
+    summary: '手动续期 Cookie（长登录保活）',
+    description: '调用闲鱼 hasLogin.do 接口刷新核心登录态，延长 Cookie 有效期到 7-30 天',
+  })
+  async renewCookie(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
+    const account = await this.service.findById(Number(id), user.tenantId);
+    if (!account) {
+      throw new NotFoundException('账号不存在');
+    }
+    return this.cookieRenew.renewOne(Number(id), user.tenantId);
+  }
+
+  /**
+   * GET /api/accounts/:id/items
+   * 拉取该闲鱼账号在售商品列表（实时调闲鱼接口，不入库）。
+   * 需 SIGN_PROVIDER=goofish + 有效 Cookie。
+   */
+  @Get(':id/items')
+  @ApiOperation({
+    summary: '拉取账号在售商品列表',
+    description: '实时调用闲鱼接口 mtop.idle.web.xyh.item.list，不入库。需 SIGN_PROVIDER=goofish',
+  })
+  async listOnSaleItems(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Query() query: ItemsQueryDto,
+  ) {
+    // 签名模式校验
+    if (this.config.get<string>('sign.provider') !== 'goofish') {
+      throw new HttpException(
+        '拉取在售商品需要 SIGN_PROVIDER=goofish',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    const account = await this.service.findById(Number(id), user.tenantId);
+    if (!account) {
+      throw new NotFoundException('账号不存在');
+    }
+
+    const page = query.page ?? 1;
+    const size = Math.min(query.size ?? 20, 50);
+    let cookie = this.service.decryptCookie(account);
+
+    try {
+      const { items, hasNext, cookie: updatedCookie } =
+        await this.goofishMtop.fetchOnSaleItems(cookie, page, size);
+
+      // cookie 续期后回写
+      if (updatedCookie && updatedCookie !== cookie) {
+        await this.service.updateCookieIfChanged(account.id, updatedCookie);
+        cookie = updatedCookie;
+      }
+
+      return { list: items, hasNext, page, size };
+    } catch (err) {
+      await handleAccountAuthError(this.service, account.id, err);
+      throw err;
+    }
   }
 
   @Delete(':id')

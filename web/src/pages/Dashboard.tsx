@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Card, Col, Row, Statistic, Tag, Typography, Alert, notification } from 'antd';
+import { Card, Col, Row, Statistic, Tag, Typography, Alert, notification, Table, Progress } from 'antd';
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -17,20 +17,26 @@ export default function Dashboard() {
   const [stats, setStats] = useState<Record<string, number>>({});
   const [signInfo, setSignInfo] = useState<{ provider: string; healthy: boolean } | null>(null);
   const [lowStock, setLowStock] = useState<any[]>([]);
+  const [trend, setTrend] = useState<{ date: string; count: number }[]>([]);
+  const [topProducts, setTopProducts] = useState<{ itemTitle: string; count: number; revenue: number }[]>([]);
   const [loading, setLoading] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
     try {
-      const [s, info, health, stock]: any = await Promise.all([
+      const [s, info, health, stock, trendData, topData]: any = await Promise.all([
         api.get('/orders/stats'),
         api.get('/sign/info'),
         api.get('/sign/health'),
         api.get('/kami/low-stock').catch(() => []),
+        api.get('/stats/trend?days=7').catch(() => []),
+        api.get('/stats/top-products?limit=5&days=30').catch(() => []),
       ]);
       setStats(s || {});
       setSignInfo({ provider: info?.provider, healthy: health?.healthy });
       setLowStock(Array.isArray(stock) ? stock : []);
+      setTrend(Array.isArray(trendData) ? trendData : []);
+      setTopProducts(Array.isArray(topData) ? topData : []);
     } catch (e) {
       console.error(e);
     } finally {
@@ -147,6 +153,63 @@ export default function Dashboard() {
           }
         />
       )}
+
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24} lg={14}>
+          <Card title="近 7 天发货量趋势">
+            {trend.length === 0 ? (
+              <Typography.Text type="secondary">暂无数据</Typography.Text>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 160, padding: '0 8px' }}>
+                {(() => {
+                  const max = Math.max(...trend.map((t) => t.count), 1);
+                  return trend.map((t) => (
+                    <div key={t.date} style={{ flex: 1, textAlign: 'center' }}>
+                      <Typography.Text style={{ fontSize: 12 }}>{t.count}</Typography.Text>
+                      <div
+                        style={{
+                          width: '100%',
+                          minHeight: 4,
+                          height: `${(t.count / max) * 120}px`,
+                          background: '#1677ff',
+                          borderRadius: 4,
+                          margin: '4px 0',
+                          transition: 'height 0.3s',
+                        }}
+                      />
+                      <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                        {t.date.slice(5)}
+                      </Typography.Text>
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} lg={10}>
+          <Card title="销量 TOP 5（近 30 天）">
+            <Table
+              size="small"
+              rowKey="itemTitle"
+              dataSource={topProducts}
+              pagination={false}
+              loading={loading}
+              columns={[
+                { title: '商品', dataIndex: 'itemTitle', ellipsis: true },
+                { title: '销量', dataIndex: 'count', width: 70, align: 'center' as const },
+                {
+                  title: '营收',
+                  dataIndex: 'revenue',
+                  width: 90,
+                  align: 'right' as const,
+                  render: (v: number) => `¥${(v / 100).toFixed(2)}`,
+                },
+              ]}
+            />
+          </Card>
+        </Col>
+      </Row>
 
       <Card title="系统状态" style={{ marginTop: 16 }}>
         {signInfo && (

@@ -61,6 +61,23 @@ export interface RefundMessageEvent {
   rawMessage: Record<string, unknown>;
 }
 
+/**
+ * 普通聊天消息事件（买家发来的非付款/非退款消息）。
+ * 用于自动回复：关键词匹配 / 默认回复 / AI 回复。
+ */
+export interface ChatMessageEvent {
+  /** 买家用户ID（发送者） */
+  buyerId: string;
+  /** 买家昵称 */
+  buyerNick?: string;
+  /** 消息文本内容 */
+  content: string;
+  /** IM 会话ID（cid，用于回复） */
+  conversationId: string;
+  /** 商品ID（可能为空） */
+  itemId?: string;
+}
+
 export function isSyncPackage(msg: Record<string, unknown>): boolean {
   const body = msg.body as Record<string, unknown> | undefined;
   if (!body?.syncPushPackage) return false;
@@ -337,5 +354,40 @@ export function tryParseRefundEvent(
     content: parsed.content,
     done: REFUND_DONE_MESSAGES.has(parsed.content),
     rawMessage: parsed.rawMessage,
+  };
+}
+
+/**
+ * 解析普通聊天消息（买家发来的、非付款/非退款的文本消息）。
+ *
+ * 过滤规则：
+ * 1. 排除卖家自己发的（sendUserId === sellerUserId）
+ * 2. 排除空内容
+ * 3. 排除付款/退款系统消息（由对应 try 函数处理）
+ * 4. 必须有 conversationId（否则无法回复）
+ *
+ * 用于自动回复链路。
+ */
+export function tryParseChatMessage(
+  parsed: ParsedImChatMessage,
+  sellerUserId: string,
+): ChatMessageEvent | null {
+  // 排除卖家自己发的
+  if (!parsed.sendUserId || parsed.sendUserId === sellerUserId) return null;
+  // 排除空内容
+  const content = (parsed.content || '').trim();
+  if (!content) return null;
+  // 排除付款/退款消息（交给专门的处理函数）
+  if (PAID_ORDER_MESSAGES.has(parsed.content)) return null;
+  if (REFUND_MESSAGES.has(parsed.content)) return null;
+  // 必须有会话ID才能回复
+  if (!parsed.conversationId) return null;
+
+  return {
+    buyerId: parsed.sendUserId,
+    buyerNick: parsed.sendUserName,
+    content,
+    conversationId: parsed.conversationId,
+    itemId: parsed.itemId || undefined,
   };
 }

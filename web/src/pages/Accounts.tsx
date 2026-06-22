@@ -209,6 +209,24 @@ export default function Accounts() {
     }
   };
 
+  // 手动续期 Cookie（长登录保活，解决一天就过期）
+  const handleRenew = async (id: number) => {
+    const hide = message.loading('正在续期 Cookie...', 0);
+    try {
+      const res: any = await api.post(`/accounts/${id}/renew`);
+      hide();
+      if (res?.success) {
+        message.success(res.message || 'Cookie 续期成功');
+      } else {
+        message.warning(res?.message || 'Cookie 续期失败，可能需要重新扫码');
+      }
+      refresh();
+    } catch (e) {
+      hide();
+      message.error(`续期失败：${(e as Error).message}`);
+    }
+  };
+
   const qrStatusText: Record<string, string> = {
     PENDING: '准备中',
     NEW: '等待扫码',
@@ -257,6 +275,14 @@ export default function Accounts() {
           <Button size="small" onClick={() => handleHealthCheck(row.id)}>
             检测Cookie
           </Button>
+          {row.status === 'active' && (
+            <Popconfirm
+              title="调用闲鱼接口续期 Cookie 登录态？"
+              onConfirm={() => handleRenew(row.id)}
+            >
+              <Button size="small">续期</Button>
+            </Popconfirm>
+          )}
           <Button size="small" onClick={() => startQrLogin(row.id)}>
             扫码更新
           </Button>

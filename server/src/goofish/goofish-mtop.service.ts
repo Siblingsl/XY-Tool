@@ -271,6 +271,91 @@ export class GoofishMtopService {
     return { ok: true, cookie: updatedCookie };
   }
 
+  /**
+   * 拉取当前账号在售商品列表。
+   *
+   * 接口：mtop.idle.web.xyh.item.list（参考 xianyu-auto-reply item_info_manager）。
+   * 对应闲鱼网页「我的闲鱼 → 我的发布 → 在售」分组。
+   * userId 取 cookie 的 unb；返回 cardList[].cardData 标准化为 OnSaleItem。
+   */
+  async fetchOnSaleItems(
+    cookie: string,
+    pageNumber = 1,
+    pageSize = 20,
+  ): Promise<{ items: OnSaleItem[]; hasNext: boolean; cookie: string }> {
+    const jar = parseCookies(cookie);
+    const userId = jar.unb || '';
+    if (!userId) {
+      throw new GoofishMtopError(
+        'mtop.idle.web.xyh.item.list',
+        'NO_UNB',
+        'Cookie 缺少 unb 字段，请使用 PC 端 goofish.com 登录 Cookie',
+      );
+    }
+
+    const { data, cookie: updatedCookie } = await this.sdkService.mtop<
+      Record<string, unknown>
+    >(
+      cookie,
+      'mtop.idle.web.xyh.item.list',
+      {
+        needGroupInfo: false,
+        pageNumber: String(pageNumber),
+        pageSize: String(pageSize),
+        groupName: '在售',
+        groupId: '58877261',
+        defaultGroup: true,
+        userId,
+      },
+      { v: '1.0', spm_cnt: 'a21ybx.im.0.0' },
+    );
+
+    const cardList = (data?.cardList as Array<Record<string, unknown>>) || [];
+    const items: OnSaleItem[] = [];
+    for (const card of cardList) {
+      const cardData = (card.cardData as Record<string, unknown>) || {};
+      const itemId = String(cardData.id ?? '');
+      if (!itemId) continue;
+
+      const priceInfo = (cardData.priceInfo as Record<string, unknown>) || {};
+      const picInfo = (cardData.picInfo as Record<string, unknown>) || {};
+
+      // 价格转分
+      const priceYuan = parseFloat(String(priceInfo.price ?? '0'));
+      const priceCents = Number.isNaN(priceYuan) ? 0 : Math.round(priceYuan * 100);
+
+      items.push({
+        itemId,
+        title: String(cardData.title ?? '(无标题)'),
+        price: priceCents,
+        priceText: String(priceInfo.preText ?? priceInfo.price ?? ''),
+        status: this.parseItemStatus(cardData.itemStatus),
+        detailUrl: String(cardData.detailUrl ?? ''),
+        picUrl: String(picInfo.url ?? picInfo.picUrl ?? ''),
+      });
+    }
+
+    // 闲鱼返回无明确 hasNext，按"本页满 pageSize 且有数据"近似判断
+    const hasNext = items.length >= pageSize && items.length > 0;
+    this.logger.debug(
+      `拉取在售商品 ${items.length} 条 (page=${pageNumber}, user=${userId})`,
+    );
+    return { items, hasNext, cookie: updatedCookie };
+  }
+
+  /** 商品状态码 → 文本（参考 xianyu-auto-reply） */
+  private parseItemStatus(raw: unknown): string {
+    const code = String(raw ?? '');
+    const map: Record<string, string> = {
+      '0': '在售',
+      '1': '在售',
+      '2': '已售出',
+      '3': '已下架',
+      '4': '审核中',
+    };
+    return map[code] || (code ? `状态${code}` : '在售');
+  }
+
   private parseSoldOrderItem(item: Record<string, unknown>): ParsedSoldOrder | null {
     const common = (item.commonData as Record<string, unknown>) || {};
     const buyerInfo = (item.buyerInfoVO as Record<string, unknown>) || {};
@@ -326,4 +411,21 @@ export interface ParsedSoldOrder {
   /** 是否处于退款中（mtop commonData.inRefund === 'true'） */
   inRefund?: boolean;
   orderCreatedAt?: Date;
+}
+
+/** 在售商品（来自 mtop.idle.web.xyh.item.list） */
+export interface OnSaleItem {
+  /** 闲鱼商品ID */
+  itemId: string;
+  title: string;
+  /** 价格（分） */
+  price: number;
+  /** 价格展示文本（如 "￥9.9"） */
+  priceText: string;
+  /** 状态文本（在售/已售出/已下架等） */
+  status: string;
+  /** 商品详情页 URL */
+  detailUrl: string;
+  /** 主图 URL */
+  picUrl: string;
 }

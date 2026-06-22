@@ -1,0 +1,94 @@
+# ============================================================
+# 闲鱼自动发货工具 - 生产环境容器编排
+#
+# 与开发版 docker-compose.yml 的区别：
+# - server/web 用 GHCR 预构建镜像（不 build，不挂源码）
+# - web 用 nginx（80端口），非 vite dev server
+# - server 启动时自动跑 migration（DB_MIGRATIONS_RUN=true）
+# - 生产关闭自动建表（DB_SYNC=false）
+# - 通过 env_file: .env.prod 加载生产环境变量
+#
+# 用法：
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d --remove-orphans
+#
+# 镜像地址由 .env.prod 的 IMAGE_OWNER / IMAGE_REPO 决定。
+# ============================================================
+
+services:
+  # ---------- 数据库 ----------
+  postgres:
+    image: postgres:16-alpine
+    container_name: xianyu-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_DATABASE:-xianyu_autodeliver}
+      POSTGRES_USER: ${DB_USERNAME:-xianyu}
+      TZ: Asia/Shanghai
+      PGTZ: Asia/Shanghai
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-xianyu} -d ${DB_DATABASE:-xianyu_autodeliver}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # 生产不暴露 DB 端口到公网（如需本地调试可取消注释）
+    # ports:
+    #   - "5433:5432"
+
+  # ---------- 缓存 / 队列 ----------
+  redis:
+    image: redis:7-alpine
+    container_name: xianyu-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    command: ${REDIS_PASSWORD:+redis-server --requirepass $REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # 生产不暴露 Redis 端口到公网
+    # ports:
+    #   - "6379:6379"
+
+  # ---------- 后端 API ----------
+  # 用 GHCR 预构建镜像，不 build，不挂源码
+  # 启动时自动跑 migration（DB_MIGRATIONS_RUN=true），生产关闭自动建表
+  server:
+    image: ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-server:latest
+    container_name: xianyu-server
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      DB_SYNC: "false"
+      DB_MIGRATIONS_RUN: "true"
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ---------- 前端 Web 控制台 ----------
+  # nginx 镜像（80端口），托管 vite 构建产物，/api 反代到 server
+  web:
+    image: ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-web:latest
+    container_name: xianyu-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - server
+
+volumes:
+  postgres-data:
+  redis-data:
