@@ -56,7 +56,7 @@ export IMAGE_OWNER IMAGE_REPO
 
 SERVER_HOST_PORT="${SERVER_HOST_PORT:-14277}"
 HEALTH_URL="http://localhost:${SERVER_HOST_PORT}/api/health"
-export SERVER_HOST_PORT WEB_HOST_PORT="${WEB_HOST_PORT:-16854}"
+export SERVER_HOST_PORT
 
 ENV_FILE=".env.prod"
 # docker compose 默认只读 .env，不读 .env.prod；必须显式传入
@@ -67,9 +67,8 @@ compose() {
 # ============ 子命令 ============
 
 cmd_deploy() {
-  log "拉取应用镜像（server / web）..."
-  # 仅拉 GHCR 应用镜像；postgres/redis 为固定 tag，本地已有则跳过，避免国内 Docker Hub 超时
-  compose pull server web
+  log "拉取 server 镜像..."
+  compose pull server
 
   # 记录当前 server 镜像 digest（用于回滚）
   local cur_digest
@@ -82,7 +81,7 @@ cmd_deploy() {
 
   log "启动服务..."
   # --pull never：postgres/redis 走本地镜像，避免国内 Docker Hub 超时
-  compose up -d --remove-orphans --pull never --pull never
+  compose up -d --remove-orphans --pull never
 
   log "等待服务健康（最长 ${HEALTH_WAIT}s）..."
   if wait_health; then
@@ -116,16 +115,9 @@ cmd_rollback() {
   fi
 
   log "回滚到 sha: $target_sha"
-  # 修改镜像 tag 为指定 sha 版本后重启
-  export SERVER_TAG=":$target_sha"
-  export WEB_TAG=":$target_sha"
-  # compose 用 latest，这里通过 docker tag 临时切换
   docker pull "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-server:$target_sha"
-  docker pull "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-web:$target_sha"
   docker tag "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-server:$target_sha" \
              "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-server:latest"
-  docker tag "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-web:$target_sha" \
-             "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-web:latest"
 
   compose up -d --remove-orphans --pull never
   log "回滚完成，等待健康检查..."

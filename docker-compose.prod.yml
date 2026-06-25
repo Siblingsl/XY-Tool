@@ -2,8 +2,7 @@
 # 闲鱼自动发货工具 - 生产环境容器编排
 #
 # 与开发版 docker-compose.yml 的区别：
-# - server/web 用 GHCR 预构建镜像（不 build，不挂源码）
-# - web 用 nginx（80端口），非 vite dev server
+# - server 用 GHCR 预构建镜像（前端部署在 Cloudflare Pages，不在此运行 web）
 # - server 启动时自动跑 migration（DB_MIGRATIONS_RUN=true）
 # - 生产关闭自动建表（DB_SYNC=false）
 # - 通过 env_file: .env.prod 加载生产环境变量
@@ -13,7 +12,7 @@
 #   docker compose -f docker-compose.prod.yml up -d --remove-orphans
 #
 # 镜像地址由 .env.prod 的 IMAGE_OWNER / IMAGE_REPO 决定。
-# 宿主机端口由 SERVER_HOST_PORT / WEB_HOST_PORT 决定（容器内仍为 3000 / 80）。
+# 宿主机端口由 SERVER_HOST_PORT 决定（容器内仍为 3000）。
 # ============================================================
 
 services:
@@ -78,17 +77,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-
-  # ---------- 前端 Web 控制台 ----------
-  # nginx 镜像（80端口），托管 vite 构建产物，/api 反代到 server
-  web:
-    image: ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-web:latest
-    container_name: xianyu-web
-    restart: unless-stopped
-    ports:
-      - "${WEB_HOST_PORT:-16854}:80"
-    depends_on:
-      - server
 
 volumes:
   postgres-data:
