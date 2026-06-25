@@ -169,6 +169,8 @@ jobs:
         run: |
           PROJECT="${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}"
           PROJECT="${PROJECT:-xy-tool-web}"
+          # 首次部署时自动创建 Pages 项目（已存在则忽略）
+          npx wrangler@3 pages project create "$PROJECT" --production-branch=main 2>/dev/null || true
           npx wrangler@3 pages deploy dist \
             --project-name="$PROJECT" \
             --commit-dirty=true
