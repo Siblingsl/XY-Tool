@@ -11,7 +11,9 @@ export function isGoofishSessionExpiredFromRet(ret?: string[]): boolean {
     retStr.includes('FAIL_SYS_TOKEN_EMPTY') ||
     retStr.includes('请重新登录') ||
     retStr.includes('已掉线') ||
-    retStr.includes('非法请求')
+    retStr.includes('非法请求') ||
+    // 权限拒绝：闲鱼对失效登录态常返回此码（非账号无权限，而是 Cookie 失效）
+    retStr.includes('PERMISSION_EXCEPTION')
   );
 }
 

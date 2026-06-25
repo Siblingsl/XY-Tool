@@ -23,6 +23,7 @@ import { StatsModule } from './modules/stats/stats.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { RedisModule } from './modules/redis/redis.module';
 import { AutoReplyModule } from './modules/auto-reply/auto-reply.module';
+import { LicenseModule } from './modules/license/license.module';
 import { SignModule } from './modules/sign/sign.module';
 import { XianyuModule } from './xianyu/xianyu.module';
 
@@ -115,6 +116,7 @@ import { XianyuModule } from './xianyu/xianyu.module';
     StatsModule,
     AdminModule,
     AutoReplyModule,
+    LicenseModule,
   ],
   providers: [
     // 全局限流守卫：未显式 @SkipThrottle() 的路由都会被限流

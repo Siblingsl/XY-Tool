@@ -141,6 +141,7 @@ export default function Products() {
       accountId: fetchAccountId,
       deliveryType: undefined,
       kamiPoolId: undefined,
+      licenseTypeCode: undefined,
       fixedContent: undefined,
       remark: undefined,
     });
@@ -153,6 +154,7 @@ export default function Products() {
     kami: '发卡密',
     link: '发链接',
     text: '发文本',
+    license: '发激活码',
   };
 
   const columns = [
@@ -235,6 +237,7 @@ export default function Products() {
                 { value: 'kami', label: '发卡密（从卡密池取）' },
                 { value: 'link', label: '发链接（固定内容）' },
                 { value: 'text', label: '发文本（固定内容）' },
+                { value: 'license', label: '发激活码（动态申请）' },
               ]}
             />
           </Form.Item>
@@ -242,20 +245,36 @@ export default function Products() {
             noStyle
             shouldUpdate={(prev, cur) => prev.deliveryType !== cur.deliveryType}
           >
-            {({ getFieldValue }) =>
-              getFieldValue('deliveryType') === 'kami' ? (
-                <Form.Item name="kamiPoolId" label="卡密池" rules={[{ required: true }]}>
-                  <Select
-                    placeholder="选择卡密池"
-                    options={pools.map((p) => ({ value: p.id, label: p.name }))}
-                  />
-                </Form.Item>
-              ) : (
+            {({ getFieldValue }) => {
+              const dt = getFieldValue('deliveryType');
+              if (dt === 'kami') {
+                return (
+                  <Form.Item name="kamiPoolId" label="卡密池" rules={[{ required: true }]}>
+                    <Select
+                      placeholder="选择卡密池"
+                      options={pools.map((p) => ({ value: p.id, label: p.name }))}
+                    />
+                  </Form.Item>
+                );
+              }
+              if (dt === 'license') {
+                return (
+                  <Form.Item
+                    name="licenseTypeCode"
+                    label="激活码类型编码"
+                    rules={[{ required: true, message: '请输入激活码类型编码（在激活码页查看）' }]}
+                    tooltip="在「激活码 → 使用说明」查看可用编码，如 monthly / yearly"
+                  >
+                    <Input placeholder="如 monthly / yearly / software_a" />
+                  </Form.Item>
+                );
+              }
+              return (
                 <Form.Item name="fixedContent" label="固定内容" rules={[{ required: true }]}>
                   <Input.TextArea rows={4} placeholder="链接或文本内容" />
                 </Form.Item>
-              )
-            }
+              );
+            }}
           </Form.Item>
           <Form.Item name="remark" label="发货附言（可选）">
             <Input.TextArea rows={2} placeholder="如：有问题联系客服" />

@@ -82,41 +82,60 @@ export class QrLoginService {
   }> {
     this.cleanupSessions();
 
-    const risk = new this.sdk.module.GoofishRiskControl();
-    const cookies = await risk.buildInitialCookies();
+    // 获取闲鱼未登录态初始 cookie（cna / cookie2 等）。
+    // 这一步调用闲鱼公开接口，可能因网络/风控失败，必须 try/catch
+    // 否则异常会冒泡成 500（前端只看到 "Request failed with status code 500"）。
+    let cookies: Record<string, string>;
+    try {
+      const risk = new this.sdk.module.GoofishRiskControl();
+      cookies = await risk.buildInitialCookies();
+    } catch (e) {
+      const msg = (e as Error).message;
+      this.logger.error(`获取初始 Cookie 失败: ${msg}`);
+      throw new BadRequestException(
+        `获取闲鱼初始 Cookie 失败：${msg}。可能原因：网络异常、闲鱼风控、fetch 不可用。请稍后重试或改用浏览器手动复制 Cookie。`,
+      );
+    }
 
     const jar = { ...cookies };
     const cna = jar.cna || '';
     const cookie2 = jar.cookie2 || '';
 
-    const miniResp = await axios.get(
-      'https://passport.goofish.com/mini_login.htm',
-      {
-        params: {
-          lang: 'zh_cn',
-          appName: 'xianyu',
-          appEntrance: 'web',
-          styleType: 'vertical',
-          bizParams: '',
-          notLoadSsoView: 'false',
-          notKeepLogin: 'false',
-          isMobile: 'false',
-          qrCodeFirst: 'false',
-          stie: '77',
-          rnd: Math.random(),
+    let miniResp;
+    try {
+      miniResp = await axios.get(
+        'https://passport.goofish.com/mini_login.htm',
+        {
+          params: {
+            lang: 'zh_cn',
+            appName: 'xianyu',
+            appEntrance: 'web',
+            styleType: 'vertical',
+            bizParams: '',
+            notLoadSsoView: 'false',
+            notKeepLogin: 'false',
+            isMobile: 'false',
+            qrCodeFirst: 'false',
+            stie: '77',
+            rnd: Math.random(),
+          },
+          headers: {
+            ...PASSPORT_HEADERS,
+            Referer: 'https://www.goofish.com/',
+            'sec-fetch-site': 'same-site',
+            'sec-fetch-dest': 'iframe',
+            'sec-fetch-mode': 'navigate',
+            Cookie: cookiesToString(jar),
+          },
+          timeout: 15_000,
+          validateStatus: () => true,
         },
-        headers: {
-          ...PASSPORT_HEADERS,
-          Referer: 'https://www.goofish.com/',
-          'sec-fetch-site': 'same-site',
-          'sec-fetch-dest': 'iframe',
-          'sec-fetch-mode': 'navigate',
-          Cookie: cookiesToString(jar),
-        },
-        timeout: 15_000,
-        validateStatus: () => true,
-      },
-    );
+      );
+    } catch (e) {
+      const msg = (e as Error).message;
+      this.logger.error(`请求 mini_login.htm 失败: ${msg}`);
+      throw new BadRequestException(`请求闲鱼登录页失败：${msg}（网络异常或被墙）`);
+    }
     this.mergeSetCookie(jar, miniResp);
 
     const csrfToken = jar['XSRF-TOKEN'] || '';
@@ -139,19 +158,26 @@ export class QrLoginService {
       umidTag: 'SERVER',
     };
 
-    const genResp = await axios.get(
-      'https://passport.goofish.com/newlogin/qrcode/generate.do',
-      {
-        params: genParams,
-        headers: {
-          ...PASSPORT_HEADERS,
-          Referer: 'https://passport.goofish.com/mini_login.htm',
-          Cookie: cookiesToString(jar),
+    let genResp;
+    try {
+      genResp = await axios.get(
+        'https://passport.goofish.com/newlogin/qrcode/generate.do',
+        {
+          params: genParams,
+          headers: {
+            ...PASSPORT_HEADERS,
+            Referer: 'https://passport.goofish.com/mini_login.htm',
+            Cookie: cookiesToString(jar),
+          },
+          timeout: 10_000,
+          validateStatus: () => true,
         },
-        timeout: 10_000,
-        validateStatus: () => true,
-      },
-    );
+      );
+    } catch (e) {
+      const msg = (e as Error).message;
+      this.logger.error(`请求 generate.do 失败: ${msg}`);
+      throw new BadRequestException(`生成二维码请求失败：${msg}（网络异常或被风控）`);
+    }
     this.mergeSetCookie(jar, genResp);
 
     const genJson = genResp.data as {

@@ -17,6 +17,7 @@ import { GOOFISH_UA } from '../../goofish/goofish.constants';
 import { handleAccountAuthError } from '../accounts/account-auth.util';
 import { RealtimeService } from '../realtime/realtime.service';
 import { AlertService } from '../alert/alert.service';
+import { LicenseService } from '../license/license.service';
 import { DeliveryJobData } from './delivery.processor';
 
 /**
@@ -48,6 +49,7 @@ export class DeliveryService {
     private readonly goofishMtop: GoofishMtopService,
     private readonly realtime: RealtimeService,
     private readonly alertService: AlertService,
+    private readonly licenseService: LicenseService,
   ) {}
 
   async processOrder(order: OrderEntity): Promise<{
@@ -346,6 +348,27 @@ export class DeliveryService {
       case 'text': {
         const text = [
           product.fixedContent || '',
+          ...(product.remark ? [`\n---\n${product.remark}`] : []),
+        ].join('');
+        return { content: text, kamiItemId: null };
+      }
+
+      case 'license': {
+        // 动态申请激活码：付款触发时向激活码中台生成一个码。
+        // 无需 lock/confirm（动态生成不会超发），生成失败走 markFailed。
+        if (!product.licenseTypeCode) {
+          return { content: null, kamiItemId: null };
+        }
+        const licenseCode = await this.licenseService.requestForDelivery(
+          product.licenseTypeCode,
+          order.tenantId,
+          order.id,
+        );
+        if (!licenseCode) {
+          return { content: null, kamiItemId: null };
+        }
+        const text = [
+          licenseCode,
           ...(product.remark ? [`\n---\n${product.remark}`] : []),
         ].join('');
         return { content: text, kamiItemId: null };

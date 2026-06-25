@@ -13,6 +13,7 @@ import { ProductsModule } from '../products/products.module';
 import { KamiPoolModule } from '../kami-pool/kami-pool.module';
 import { OrdersModule } from '../orders/orders.module';
 import { RealtimeModule } from '../realtime/realtime.module';
+import { LicenseModule } from '../license/license.module';
 
 /**
  * 发货模块。
@@ -30,6 +31,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     KamiPoolModule,
     OrdersModule,
     RealtimeModule,
+    LicenseModule,
   ],
   providers: [DeliveryService, DeliveryProcessor, DeliverySchedulerService],
   controllers: [DeliveryController],

@@ -7,6 +7,7 @@ import Products from './pages/Products';
 import KamiPool from './pages/KamiPool';
 import Orders from './pages/Orders';
 import AutoReply from './pages/AutoReply';
+import License from './pages/License';
 import Profile from './pages/Profile';
 
 export default function App() {
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="kami" element={<KamiPool />} />
           <Route path="orders" element={<Orders />} />
           <Route path="auto-reply" element={<AutoReply />} />
+          <Route path="license" element={<License />} />
           <Route path="profile" element={<Profile />} />
         </Route>
       </Routes>

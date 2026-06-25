@@ -111,6 +111,15 @@ export default () => ({
   },
 
   /**
+   * 激活码中台配置。
+   * apiKey: 对外验证 API 的密钥（外部工具用 X-API-Key 头鉴权）。
+   *         生成：openssl rand -hex 24
+   */
+  license: {
+    apiKey: process.env.LICENSE_API_KEY || '',
+  },
+
+  /**
    * 告警通道配置。
    * 当发货失败 / 账号过期 / 库存不足 / 订单卡住时推送到外部 IM。
    * - dingtalk: Webhook URL（可选加签 secret）

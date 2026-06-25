@@ -32,9 +32,9 @@ export class CreateProductDto {
   @IsNotEmpty()
   title: string;
 
-  @ApiProperty({ description: '发货方式', enum: ['kami', 'link', 'text'] })
+  @ApiProperty({ description: '发货方式', enum: ['kami', 'link', 'text', 'license'] })
   @IsString()
-  @IsIn(['kami', 'link', 'text'])
+  @IsIn(['kami', 'link', 'text', 'license'])
   deliveryType: string;
 
   @ApiProperty({ description: '卡密池ID（deliveryType=kami 时必填）', required: false })
@@ -42,6 +42,11 @@ export class CreateProductDto {
   @IsOptional()
   @Type(() => Number)
   kamiPoolId?: number;
+
+  @ApiProperty({ description: '激活码类型编码（deliveryType=license 时填，如 monthly）', required: false })
+  @IsString()
+  @IsOptional()
+  licenseTypeCode?: string;
 
   @ApiProperty({ description: '固定发货内容（deliveryType=link/text 时填）', required: false })
   @IsString()
@@ -60,9 +65,9 @@ export class UpdateProductDto {
   @IsOptional()
   title?: string;
 
-  @ApiProperty({ description: '发货方式', enum: ['kami', 'link', 'text'], required: false })
+  @ApiProperty({ description: '发货方式', enum: ['kami', 'link', 'text', 'license'], required: false })
   @IsString()
-  @IsIn(['kami', 'link', 'text'])
+  @IsIn(['kami', 'link', 'text', 'license'])
   @IsOptional()
   deliveryType?: string;
 
@@ -71,6 +76,11 @@ export class UpdateProductDto {
   @IsOptional()
   @Type(() => Number)
   kamiPoolId?: number;
+
+  @ApiProperty({ description: '激活码类型编码（license 模式）', required: false })
+  @IsString()
+  @IsOptional()
+  licenseTypeCode?: string;
 
   @ApiProperty({ description: '固定发货内容', required: false })
   @IsString()

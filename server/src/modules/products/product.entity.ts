@@ -3,11 +3,12 @@ import { BaseEntity } from '../../common/entities/base.entity';
 
 /**
  * 发货规则类型：
- * - kami:   发卡密（从卡密池取一条）
- * - link:   发网盘链接（固定内容，可重复发送）
- * - text:   发固定文本（如使用说明、感谢语）
+ * - kami:    发卡密（从卡密池取一条）
+ * - link:    发网盘链接（固定内容，可重复发送）
+ * - text:    发固定文本（如使用说明、感谢语）
+ * - license: 发激活码（付款触发时向激活码中台动态申请一个）
  */
-export type DeliveryType = 'kami' | 'link' | 'text';
+export type DeliveryType = 'kami' | 'link' | 'text' | 'license';
 
 /**
  * 商品配置表。
@@ -47,6 +48,19 @@ export class ProductEntity extends BaseEntity {
    */
   @Column({ name: 'kami_pool_id', type: 'bigint', nullable: true, comment: '卡密池ID' })
   kamiPoolId: number | null;
+
+  /**
+   * 激活码类型编码（仅 deliveryType=license 时使用）。
+   * 付款触发时按此编码向激活码中台申请一个码（如 monthly/yearly/software_a）。
+   */
+  @Column({
+    type: 'varchar',
+    length: 50,
+    name: 'license_type_code',
+    nullable: true,
+    comment: '激活码类型编码',
+  })
+  licenseTypeCode: string | null;
 
   /**
    * 固定发货内容（deliveryType=link/text 时使用）。

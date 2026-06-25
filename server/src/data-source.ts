@@ -12,6 +12,11 @@ import {
   ReplyConfigEntity,
   ReplyHandoffEntity,
 } from './modules/auto-reply/entities/reply.entities';
+import {
+  LicenseTypeEntity,
+  LicenseBatchEntity,
+  LicenseCodeEntity,
+} from './modules/license/entities/license.entities';
 
 /**
  * TypeORM DataSource 独立实例。
@@ -47,6 +52,9 @@ export const AppDataSource = new DataSource({
     ReplyKeywordEntity,
     ReplyConfigEntity,
     ReplyHandoffEntity,
+    LicenseTypeEntity,
+    LicenseBatchEntity,
+    LicenseCodeEntity,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   migrationsTableName: 'typeorm_migrations',
