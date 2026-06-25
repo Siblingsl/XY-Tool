@@ -11,7 +11,8 @@
 #   ENABLE_DEPLOY=true          开启后端 SSH 部署
 #   ENABLE_CF_DEPLOY=true       开启前端 CF Pages 部署
 #   DEPLOY_DIR=/opt/xianyu-tool  （可选）
-#   BACKEND_URL=http://IP:14277  后端 API 地址（CF Functions 反代用）
+#   VITE_API_BASE_URL=https://xy-api.skyed.dpdns.org/api  浏览器直连 API（推荐）
+#   BACKEND_URL=...  仅在使用 Pages Functions 反代 /api 时需要（国内机不推荐）
 #   CLOUDFLARE_PAGES_PROJECT_NAME=xy-tool-web
 # ============================================================
 
@@ -95,7 +96,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          source: "docker-compose.prod.yml,scripts/deploy.sh"
+          source: "docker-compose.prod.yml,scripts/deploy.sh,nginx/api.conf"
           target: ${{ vars.DEPLOY_DIR || '/opt/xianyu-tool' }}
 
       - name: Deploy via SSH
@@ -140,17 +141,13 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Inject wrangler config
+        if: ${{ vars.BACKEND_URL != '' }}
         working-directory: web
         env:
           BACKEND: ${{ vars.BACKEND_URL }}
           ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          if [ -z "$BACKEND" ]; then
-            echo "::error::请在 GitHub Variables 中设置 BACKEND_URL（如 http://120.27.20.115:14277）"
-            exit 1
-          fi
           sed -i "s|^BACKEND_URL = .*|BACKEND_URL = \"${BACKEND}\"|" wrangler.toml
-          # account_id 写入 wrangler.toml，避免 wrangler-action 截断 Account ID
           if grep -q '^account_id' wrangler.toml; then
             sed -i "s|^account_id = .*|account_id = \"${ACCOUNT_ID}\"|" wrangler.toml
           else
@@ -159,6 +156,8 @@ jobs:
 
       - name: Build web
         working-directory: web
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
         run: npm ci && npm run build
 
       - name: Deploy to Cloudflare Pages

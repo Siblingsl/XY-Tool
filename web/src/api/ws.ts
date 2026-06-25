@@ -1,3 +1,5 @@
+import { wsUrl } from './config';
+
 type EventHandler = (data: any) => void;
 
 export type WsStatus = 'connecting' | 'connected' | 'disconnected';
@@ -33,8 +35,7 @@ class WsClient {
   private buildUrl(): string | null {
     const token = localStorage.getItem('accessToken');
     if (!token) return null;
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    return `${proto}://${window.location.host}/api/ws?token=${encodeURIComponent(token)}`;
+    return wsUrl(token);
   }
 
   connect(): void {

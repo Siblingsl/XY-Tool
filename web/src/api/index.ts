@@ -1,4 +1,5 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios';
+import { API_BASE_URL, apiPath } from './config';
 
 /**
  * API 客户端封装。
@@ -7,7 +8,7 @@ import axios, { type InternalAxiosRequestConfig } from 'axios';
  * - 统一处理后端返回的 { code, message, data } 格式
  */
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE_URL,
   timeout: 15000,
 });
 
@@ -19,7 +20,7 @@ async function tryRefresh(): Promise<string | null> {
   const rt = localStorage.getItem('refreshToken');
   if (!rt) return null;
   try {
-    const res = await axios.post('/api/auth/refresh', { refreshToken: rt });
+    const res = await axios.post(apiPath('/auth/refresh'), { refreshToken: rt });
     const body = res.data;
     const token = body?.data?.accessToken ?? body?.accessToken;
     if (token) {

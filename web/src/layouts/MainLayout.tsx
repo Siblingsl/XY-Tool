@@ -13,6 +13,7 @@ import {
   SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { apiPath } from '../api/config';
 import { wsClient, type WsStatus } from '../api/ws';
 
 const { Header, Sider, Content } = Layout;
@@ -67,7 +68,7 @@ export default function MainLayout() {
   const handleLogout = async () => {
     const rt = localStorage.getItem('refreshToken');
     try {
-      await fetch('/api/auth/logout', {
+      await fetch(apiPath('/auth/logout'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken: rt }),
