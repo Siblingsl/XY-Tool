@@ -34,11 +34,11 @@ export class ProductEntity extends BaseEntity {
   @Column({ length: 200, comment: '商品标题（展示用，同步自闲鱼）' })
   title: string;
 
-  /** 发货方式 */
   @Column({
     length: 20,
     type: 'varchar',
-    comment: '发货方式: kami/link/text',
+    name: 'delivery_type',
+    comment: '发货方式: kami/link/text/license',
   })
   deliveryType: DeliveryType;
 
