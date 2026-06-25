@@ -13,6 +13,7 @@
 #   docker compose -f docker-compose.prod.yml up -d --remove-orphans
 #
 # 镜像地址由 .env.prod 的 IMAGE_OWNER / IMAGE_REPO 决定。
+# 宿主机端口由 SERVER_HOST_PORT / WEB_HOST_PORT 决定（容器内仍为 3000 / 80）。
 # ============================================================
 
 services:
@@ -71,7 +72,7 @@ services:
       DB_MIGRATIONS_RUN: "true"
       NODE_ENV: production
     ports:
-      - "3000:3000"
+      - "${SERVER_HOST_PORT:-14277}:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,7 +86,7 @@ services:
     container_name: xianyu-web
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "${WEB_HOST_PORT:-16854}:80"
     depends_on:
       - server
 

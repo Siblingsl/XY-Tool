@@ -11,9 +11,8 @@
 # ============================================================
 set -euo pipefail
 
-# 配置
+# 配置（SERVER_HOST_PORT 在加载 .env.prod 后设置 HEALTH_URL）
 COMPOSE_FILE="docker-compose.prod.yml"
-HEALTH_URL="http://localhost:3000/api/health"
 HEALTH_WAIT=45  # 健康检查最长等待秒数
 HEALTH_INTERVAL=3
 
@@ -27,8 +26,9 @@ log()  { echo -e "${GREEN}[$(date +%H:%M:%S)]${NC} $*"; }
 warn() { echo -e "${YELLOW}[$(date +%H:%M:%S)] WARN:${NC} $*"; }
 err()  { echo -e "${RED}[$(date +%H:%M:%S)] ERROR:${NC} $*" >&2; }
 
-# 切换到脚本所在目录（应为 /opt/xianyu-tool）
-cd "$(dirname "$0")"
+# 切换到部署根目录（scripts/ 的上一级，应为 /opt/xianyu-tool）
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT_DIR"
 
 # 检查 .env.prod
 if [ ! -f .env.prod ]; then
@@ -37,18 +37,39 @@ if [ ! -f .env.prod ]; then
 fi
 
 # 加载环境变量（获取 IMAGE_OWNER / IMAGE_REPO）
-set -a; source .env.prod; set +a
+# 关闭 glob，避免 COOKIE_RENEW_CRON 等含 */ 的值被 bash 展开
+set -a
+set -f
+source .env.prod
+set +f
+set +a
 
 if [ -z "${IMAGE_OWNER:-}" ] || [ -z "${IMAGE_REPO:-}" ]; then
   err ".env.prod 缺少 IMAGE_OWNER 或 IMAGE_REPO"
   exit 1
 fi
 
+# GHCR / Docker 镜像名必须小写（CI 构建时已转小写）
+IMAGE_OWNER=$(echo "${IMAGE_OWNER}" | tr '[:upper:]' '[:lower:]')
+IMAGE_REPO=$(echo "${IMAGE_REPO}" | tr '[:upper:]' '[:lower:]')
+export IMAGE_OWNER IMAGE_REPO
+
+SERVER_HOST_PORT="${SERVER_HOST_PORT:-14277}"
+HEALTH_URL="http://localhost:${SERVER_HOST_PORT}/api/health"
+export SERVER_HOST_PORT WEB_HOST_PORT="${WEB_HOST_PORT:-16854}"
+
+ENV_FILE=".env.prod"
+# docker compose 默认只读 .env，不读 .env.prod；必须显式传入
+compose() {
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
+
 # ============ 子命令 ============
 
 cmd_deploy() {
-  log "拉取最新镜像..."
-  docker compose -f "$COMPOSE_FILE" pull
+  log "拉取应用镜像（server / web）..."
+  # 仅拉 GHCR 应用镜像；postgres/redis 为固定 tag，本地已有则跳过，避免国内 Docker Hub 超时
+  compose pull server web
 
   # 记录当前 server 镜像 digest（用于回滚）
   local cur_digest
@@ -60,7 +81,7 @@ cmd_deploy() {
   fi
 
   log "启动服务..."
-  docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+  compose up -d --remove-orphans
 
   log "等待服务健康（最长 ${HEALTH_WAIT}s）..."
   if wait_health; then
@@ -68,7 +89,7 @@ cmd_deploy() {
     cmd_status
   else
     err "❌ 健康检查失败，服务可能未正常启动"
-    err "查看日志：docker compose -f $COMPOSE_FILE logs --tail=50 server"
+    err "查看日志：compose logs --tail=50 server"
     warn "如需回滚：./deploy.sh rollback"
     exit 1
   fi
@@ -105,7 +126,7 @@ cmd_rollback() {
   docker tag "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-web:$target_sha" \
              "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-web:latest"
 
-  docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
+  compose up -d --remove-orphans
   log "回滚完成，等待健康检查..."
   if wait_health; then
     log "✅ 回滚成功"
@@ -117,7 +138,7 @@ cmd_rollback() {
 
 cmd_status() {
   echo "=== 容器状态 ==="
-  docker compose -f "$COMPOSE_FILE" ps
+  compose ps
   echo ""
   echo "=== 健康检查 ==="
   if curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
