@@ -81,7 +81,8 @@ cmd_deploy() {
   fi
 
   log "启动服务..."
-  compose up -d --remove-orphans
+  # --pull never：postgres/redis 走本地镜像，避免国内 Docker Hub 超时
+  compose up -d --remove-orphans --pull never --pull never
 
   log "等待服务健康（最长 ${HEALTH_WAIT}s）..."
   if wait_health; then
@@ -126,7 +127,7 @@ cmd_rollback() {
   docker tag "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-web:$target_sha" \
              "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-web:latest"
 
-  compose up -d --remove-orphans
+  compose up -d --remove-orphans --pull never
   log "回滚完成，等待健康检查..."
   if wait_health; then
     log "✅ 回滚成功"

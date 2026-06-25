@@ -114,6 +114,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 每次部署前同步 compose / deploy 脚本（服务器上的文件不会随 push 自动更新）
+      - name: Sync deploy files to server
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "docker-compose.prod.yml,scripts/deploy.sh"
+          target: ${{ vars.DEPLOY_DIR || '/opt/xianyu-tool' }}
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -121,9 +132,9 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          # 部署脚本在服务器上执行：拉镜像 + 启动 + 健康检查
           script: |
             cd ${{ vars.DEPLOY_DIR || '/opt/xianyu-tool' }}
+            chmod +x scripts/deploy.sh
             bash scripts/deploy.sh deploy
 
       - name: Summary
