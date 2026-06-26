@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   Form,
   Input,
@@ -29,27 +29,44 @@ export default function Login() {
   const [eggCount, setEggCount] = useState(0);
   const [loginForm] = Form.useForm();
   const [registerForm] = Form.useForm();
+  const submittingRef = useRef(false);
+
+  const persistAuth = (res: {
+    accessToken?: string;
+    refreshToken?: string;
+    user?: unknown;
+  }) => {
+    if (!res?.accessToken || !res?.refreshToken) {
+      throw new Error("未获取到登录凭证，请重试或直接登录");
+    }
+    localStorage.setItem("accessToken", res.accessToken);
+    localStorage.setItem("refreshToken", res.refreshToken);
+    localStorage.setItem("user", JSON.stringify(res.user ?? {}));
+  };
+
+  const formatAuthError = (message: string) => {
+    if (/已被注册|已存在|already/i.test(message)) {
+      return "该用户名已注册，请直接登录";
+    }
+    return message;
+  };
 
   // ============ 业务逻辑（保持原样） ============
 
   const handleLogin = async (values: { username: string; password: string }) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
     try {
       const res: any = await api.post("/auth/login", values);
-      localStorage.setItem("accessToken", res.accessToken);
-      localStorage.setItem("refreshToken", res.refreshToken);
-      localStorage.setItem("user", JSON.stringify(res.user));
+      persistAuth(res);
       message.success("登录成功");
-      if (!res.accessToken) {
-        message.error("登录失败");
-        return;
-      } else {
-        navigate("/dashboard", { replace: true });
-      }
+      navigate("/dashboard", { replace: true });
     } catch (e) {
-      message.error((e as Error).message);
+      message.error(formatAuthError((e as Error).message));
     } finally {
       setLoading(false);
+      submittingRef.current = false;
     }
   };
 
@@ -58,18 +75,26 @@ export default function Login() {
     password: string;
     nickname?: string;
   }) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setLoading(true);
     try {
       const res: any = await api.post("/auth/register", values);
-      localStorage.setItem("accessToken", res.accessToken);
-      localStorage.setItem("refreshToken", res.refreshToken);
-      localStorage.setItem("user", JSON.stringify(res.user));
+      persistAuth(res);
       message.success("注册成功");
       navigate("/dashboard", { replace: true });
     } catch (e) {
-      message.error((e as Error).message);
+      const msg = formatAuthError((e as Error).message);
+      if (msg.includes("请直接登录")) {
+        message.warning(msg);
+        setShowRegister(false);
+        loginForm.setFieldsValue({ username: values.username });
+      } else {
+        message.error(msg);
+      }
     } finally {
       setLoading(false);
+      submittingRef.current = false;
     }
   };
 

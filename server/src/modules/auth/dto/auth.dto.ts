@@ -1,4 +1,4 @@
-import { IsString, MinLength, MaxLength, Matches } from 'class-validator';
+import { IsString, MinLength, MaxLength, Matches, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 /** 注册 DTO */
@@ -19,6 +19,7 @@ export class RegisterDto {
   password: string;
 
   @ApiProperty({ description: '昵称（可选）', required: false, example: '小明' })
+  @IsOptional()
   @IsString()
   @MaxLength(50)
   nickname?: string;

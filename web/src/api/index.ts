@@ -49,11 +49,18 @@ function getRefreshPromise(): Promise<string | null> {
   return refreshPromise;
 }
 
-// 请求拦截：附加 token
+// 请求拦截：附加 token（登录/注册等公开接口不附带，避免脏 token 干扰）
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  const url = config.url || '';
+  const isPublicAuth =
+    url.includes('/auth/login') ||
+    url.includes('/auth/register') ||
+    url.includes('/auth/refresh');
+  if (!isPublicAuth) {
+    const token = localStorage.getItem('accessToken');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
   }
   return config;
 });

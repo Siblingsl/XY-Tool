@@ -41,6 +41,13 @@ async function bootstrap() {
     );
   }
 
+  const jwtSecret = config.get<string>('jwt.secret');
+  const jwtRefreshSecret = config.get<string>('jwt.refreshSecret');
+  if (!jwtSecret || !jwtRefreshSecret) {
+    logger.error('JWT_SECRET 未配置：注册/登录将无法签发 Token');
+    process.exit(1);
+  }
+
   // 2. CORS
   app.enableCors({
     origin: config.get<string>('cors.origin'),

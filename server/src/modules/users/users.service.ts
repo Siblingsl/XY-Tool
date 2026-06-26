@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { UserEntity } from './user.entity';
 
@@ -35,19 +35,35 @@ export class UsersService {
     password: string;
     nickname?: string;
   }): Promise<UserEntity> {
+    return this.createWithManager(this.repo.manager, input);
+  }
+
+  /** 在事务内创建用户（注册原子性） */
+  async createWithManager(
+    manager: EntityManager,
+    input: {
+      username: string;
+      password: string;
+      nickname?: string;
+    },
+  ): Promise<UserEntity> {
     const hashed = await bcrypt.hash(input.password, 10);
-    const entity = this.repo.create({
+    const entity = manager.create(UserEntity, {
       username: input.username,
       password: hashed,
       nickname: input.nickname || null,
       role: 'admin',
       status: 'active',
-      tenantId: 0, // 占位，保存后用生成的 id 回填
+      tenantId: 0,
     });
-    // 保存后用生成的 id 回填 tenantId（单用户即租户）
-    const saved = await this.repo.save(entity);
+    const saved = await manager.save(entity);
     saved.tenantId = saved.id;
-    return this.repo.save(saved);
+    return manager.save(saved);
+  }
+
+  /** 注册失败补偿：删除未完成的用户记录 */
+  async deleteById(id: number): Promise<void> {
+    await this.repo.delete(id);
   }
 
   /** 校验明文密码与哈希是否匹配 */
@@ -99,6 +115,15 @@ export class UsersService {
   async saveRefreshToken(id: number, refreshToken: string): Promise<void> {
     const hash = await bcrypt.hash(refreshToken, 10);
     await this.repo.update(id, { refreshTokenHash: hash });
+  }
+
+  async saveRefreshTokenWithManager(
+    manager: EntityManager,
+    id: number,
+    refreshToken: string,
+  ): Promise<void> {
+    const hash = await bcrypt.hash(refreshToken, 10);
+    await manager.update(UserEntity, id, { refreshTokenHash: hash });
   }
 
   /** 按 id 查询并带回 refreshTokenHash（校验 refresh 时用） */

@@ -1,14 +1,16 @@
 import {
   ConflictException,
   Injectable,
+  InternalServerErrorException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import * as crypto from 'crypto';
+import { DataSource, QueryFailedError } from 'typeorm';
 import { UsersService } from '../users/users.service';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
+import { UserEntity } from '../users/user.entity';
 
 /**
  * 认证服务。
@@ -24,15 +26,33 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async register(dto: RegisterDto) {
-    const exists = await this.usersService.findByUsername(dto.username);
-    if (exists) {
-      throw new ConflictException('用户名已被注册');
+    this.assertJwtConfigured();
+
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        const existing = await manager.findOne(UserEntity, {
+          where: { username: dto.username },
+        });
+        if (existing) {
+          throw new ConflictException('用户名已被注册');
+        }
+
+        const user = await this.usersService.createWithManager(manager, dto);
+        return this.buildAuthResponse(user, manager);
+      });
+    } catch (err) {
+      if (err instanceof ConflictException) {
+        throw err;
+      }
+      if (this.isDuplicateUsernameError(err)) {
+        throw new ConflictException('用户名已被注册');
+      }
+      throw err;
     }
-    const user = await this.usersService.create(dto);
-    return this.buildAuthResponse(user);
   }
 
   async login(dto: LoginDto) {
@@ -108,15 +128,18 @@ export class AuthService {
   }
 
   /** 组装登录态响应（access + refresh） */
-  private async buildAuthResponse(user: {
-    id: number;
-    username: string;
-    tenantId: number;
-    nickname: string | null;
-    role: string;
-  }) {
+  private async buildAuthResponse(
+    user: {
+      id: number;
+      username: string;
+      tenantId: number;
+      nickname: string | null;
+      role: string;
+    },
+    manager?: import('typeorm').EntityManager,
+  ) {
     const accessToken = this.signAccessToken(user);
-    const refreshToken = await this.signAndStoreRefreshToken(user);
+    const refreshToken = await this.signAndStoreRefreshToken(user, manager);
 
     return {
       accessToken,
@@ -128,6 +151,22 @@ export class AuthService {
         tenantId: user.tenantId,
       },
     };
+  }
+
+  private assertJwtConfigured(): void {
+    const secret = this.config.get<string>('jwt.secret');
+    const refreshSecret = this.config.get<string>('jwt.refreshSecret');
+    if (!secret || !refreshSecret) {
+      throw new InternalServerErrorException(
+        '服务端未配置 JWT_SECRET，无法完成注册',
+      );
+    }
+  }
+
+  private isDuplicateUsernameError(err: unknown): boolean {
+    if (!(err instanceof QueryFailedError)) return false;
+    const code = (err.driverError as { code?: string })?.code;
+    return code === '23505';
   }
 
   private signAccessToken(user: {
@@ -147,12 +186,15 @@ export class AuthService {
     return this.jwtService.sign(payload, { expiresIn });
   }
 
-  private async signAndStoreRefreshToken(user: {
-    id: number;
-    username: string;
-    tenantId: number;
-    role: string;
-  }): Promise<string> {
+  private async signAndStoreRefreshToken(
+    user: {
+      id: number;
+      username: string;
+      tenantId: number;
+      role: string;
+    },
+    manager?: import('typeorm').EntityManager,
+  ): Promise<string> {
     const payload: JwtPayload = {
       sub: user.id,
       username: user.username,
@@ -161,12 +203,23 @@ export class AuthService {
       type: 'refresh',
     };
     const expiresIn = this.config.get<string>('jwt.refreshExpiresIn') || '30d';
+    const refreshSecret = this.config.get<string>('jwt.refreshSecret');
+    if (!refreshSecret) {
+      throw new InternalServerErrorException('服务端未配置 JWT_REFRESH_SECRET');
+    }
     const refreshToken = this.jwtService.sign(payload, {
-      secret: this.config.get<string>('jwt.refreshSecret'),
+      secret: refreshSecret,
       expiresIn,
     });
-    // 哈希入库，支持服务端吊销
-    await this.usersService.saveRefreshToken(user.id, refreshToken);
+    if (manager) {
+      await this.usersService.saveRefreshTokenWithManager(
+        manager,
+        user.id,
+        refreshToken,
+      );
+    } else {
+      await this.usersService.saveRefreshToken(user.id, refreshToken);
+    }
     return refreshToken;
   }
 }
