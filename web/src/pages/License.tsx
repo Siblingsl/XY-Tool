@@ -485,7 +485,12 @@ function GuideTab() {
         {types.length > 0 && (
           <>
             <Typography.Paragraph>
-              <Typography.Text strong>可用类型编码（商品规则 license 模式填这个）：</Typography.Text>
+              <Typography.Text strong>商品发货（发激活码）：</Typography.Text>
+              优先从库存发放未使用码；库存不足时自动生成一条再发送。已激活的码不会发出。
+            </Typography.Paragraph>
+
+            <Typography.Paragraph>
+              <Typography.Text strong>可用类型（商品规则中选择）：</Typography.Text>
             </Typography.Paragraph>
             <Table
               size="small"
@@ -495,6 +500,7 @@ function GuideTab() {
               columns={[
                 { title: '名称', dataIndex: 'name' },
                 { title: '编码', dataIndex: 'code', render: (v: string) => <Typography.Text copyable code>{v}</Typography.Text> },
+                { title: '可发放', dataIndex: 'unusedStock', render: (v: number) => v ?? 0 },
                 { title: '有效期', dataIndex: 'durationDays', render: (v: number | null) => (v ? `${v}天` : '永久') },
               ]}
             />

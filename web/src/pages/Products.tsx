@@ -27,6 +27,7 @@ export default function Products() {
   const [data, setData] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [pools, setPools] = useState<any[]>([]);
+  const [licenseTypes, setLicenseTypes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
@@ -42,14 +43,16 @@ export default function Products() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const [list, accs, pls] = await Promise.all([
+      const [list, accs, pls, ltypes] = await Promise.all([
         api.get('/products'),
         api.get('/accounts'),
         api.get('/kami/pools'),
+        api.get('/license/manage/types'),
       ]);
       setData(list as unknown as any[]);
       setAccounts(accs as unknown as any[]);
       setPools(pls as unknown as any[]);
+      setLicenseTypes((ltypes as unknown as any[]) || []);
     } catch (e) {
       message.error((e as Error).message);
     } finally {
@@ -164,7 +167,16 @@ export default function Products() {
     {
       title: '发货方式',
       dataIndex: 'deliveryType',
-      render: (t: string) => <Tag color="blue">{deliveryTypeText[t] || t}</Tag>,
+      render: (t: string, row: any) => (
+        <Space direction="vertical" size={0}>
+          <Tag color="blue">{deliveryTypeText[t] || t}</Tag>
+          {t === 'license' && row.licenseTypeCode && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {licenseTypes.find((lt) => lt.code === row.licenseTypeCode)?.name || row.licenseTypeCode}
+            </Typography.Text>
+          )}
+        </Space>
+      ),
     },
     {
       title: '启用',
@@ -258,14 +270,33 @@ export default function Products() {
                 );
               }
               if (dt === 'license') {
+                const enabledTypes = licenseTypes.filter((t) => t.enabled !== false);
                 return (
                   <Form.Item
                     name="licenseTypeCode"
-                    label="激活码类型编码"
-                    rules={[{ required: true, message: '请输入激活码类型编码（在激活码页查看）' }]}
-                    tooltip="在「激活码 → 使用说明」查看可用编码，如 monthly / yearly"
+                    label="激活码类型"
+                    rules={[{ required: true, message: '请选择激活码类型' }]}
+                    extra={
+                      enabledTypes.length === 0 ? (
+                        <Typography.Text type="warning">
+                          暂无激活码类型，请先在「激活码 → 类型管理」中创建
+                        </Typography.Text>
+                      ) : (
+                        <Typography.Text type="secondary">
+                          优先发放库存中的未使用码；库存不足时自动生成。已激活的码不会发出。
+                        </Typography.Text>
+                      )
+                    }
                   >
-                    <Input placeholder="如 monthly / yearly / software_a" />
+                    <Select
+                      placeholder="选择激活码类型"
+                      showSearch
+                      optionFilterProp="label"
+                      options={enabledTypes.map((t) => ({
+                        value: t.code,
+                        label: `${t.name}（${t.code}）· 库存 ${t.unusedStock ?? 0}`,
+                      }))}
+                    />
                   </Form.Item>
                 );
               }

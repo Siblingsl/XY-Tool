@@ -62,6 +62,8 @@ JWT_SECRET=
 JWT_REFRESH_SECRET=
 COOKIE_ENCRYPTION_KEY=
 CORS_ORIGIN=http://localhost
+# 激活码对外验证（Codex 安装器 config.js 的 apiKey 须与此一致）
+LICENSE_API_KEY=
 # ====== 可选（按需调整）======
 SIGN_PROVIDER=goofish
 EOF
@@ -83,6 +85,9 @@ EOF
   echo ""
   echo "COOKIE_ENCRYPTION_KEY（64位hex）:"
   echo "  node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
+  echo ""
+  echo "LICENSE_API_KEY（激活码对外 API，与客户端 config.js 一致）:"
+  echo "  openssl rand -hex 24"
   echo "=========================================="
 }
 

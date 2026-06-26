@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import {
   LicenseTypeEntity,
@@ -47,12 +47,19 @@ export class LicenseService {
     private readonly batchRepo: Repository<LicenseBatchEntity>,
     @InjectRepository(LicenseCodeEntity)
     private readonly codeRepo: Repository<LicenseCodeEntity>,
+    private readonly dataSource: DataSource,
   ) {}
 
   // ============ 类型管理 ============
 
-  async listTypes(tenantId: number): Promise<LicenseTypeEntity[]> {
-    return this.typeRepo.find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+  async listTypes(tenantId: number): Promise<(LicenseTypeEntity & { unusedStock: number })[]> {
+    const types = await this.typeRepo.find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+    const result: (LicenseTypeEntity & { unusedStock: number })[] = [];
+    for (const t of types) {
+      const unusedStock = await this.countUnused(t.id, tenantId);
+      result.push({ ...t, unusedStock });
+    }
+    return result;
   }
 
   async createType(input: Partial<LicenseTypeEntity> & { tenantId: number }): Promise<LicenseTypeEntity> {
@@ -154,10 +161,8 @@ export class LicenseService {
   }
 
   /**
-   * 发货触发：按类型编码生成1个激活码。
-   * 供 delivery.service 的 license 分支调用。
-   * @param typeCode 类型编码（如 monthly）
-   * @returns 激活码明文（失败返回 null）
+   * 发货触发：优先从库存领取未使用码；库存不足时自动生成一条再发放。
+   * 绝不发放已激活(active)/已作废/已过期码。
    */
   async requestForDelivery(
     typeCode: string,
@@ -167,15 +172,89 @@ export class LicenseService {
     try {
       const type = await this.typeRepo.findOne({ where: { tenantId, code: typeCode } });
       if (!type || !type.enabled) {
-        this.logger.warn(`发货申请激活码失败：类型 ${typeCode} 不存在或已禁用`);
+        this.logger.warn(`发货领取激活码失败：类型 ${typeCode} 不存在或已禁用`);
         return null;
       }
+
+      // 发货重试：复用已绑定本订单、仍未激活的码
+      const existing = await this.codeRepo.findOne({
+        where: {
+          tenantId,
+          typeId: type.id,
+          orderId,
+          status: 'unused',
+        },
+      });
+      if (existing) {
+        return existing.code;
+      }
+
+      const fromStock = await this.allocateUnusedCode(type.id, tenantId, orderId);
+      if (fromStock) {
+        return fromStock;
+      }
+
+      // 保底：库存耗尽时现场生成一条（来源 delivery，绑定订单）
+      this.logger.log(`类型 ${typeCode} 库存不足，自动生成激活码（订单=${orderId}）`);
       const { codes } = await this.generateCodes(type.id, 1, tenantId, 'delivery', orderId);
       return codes[0] ?? null;
     } catch (err) {
-      this.logger.error(`发货申请激活码异常: ${(err as Error).message}`);
+      this.logger.error(`发货领取激活码异常: ${(err as Error).message}`);
       return null;
     }
+  }
+
+  /**
+   * 从库存领取一条未使用激活码（事务 + 悲观锁，防并发超发）。
+   * 仅 status=unused 且尚未绑定订单的码可被领取。
+   */
+  async allocateUnusedCode(
+    typeId: number,
+    tenantId: number,
+    orderId: number,
+  ): Promise<string | null> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const row = await queryRunner.manager
+        .createQueryBuilder(LicenseCodeEntity, 'lc')
+        .setLock('pessimistic_write')
+        .where('lc.typeId = :typeId', { typeId })
+        .andWhere('lc.tenantId = :tenantId', { tenantId })
+        .andWhere('lc.status = :status', { status: 'unused' })
+        .andWhere('lc.orderId IS NULL')
+        .orderBy('lc.id', 'ASC')
+        .limit(1)
+        .getOne();
+
+      if (!row) {
+        await queryRunner.commitTransaction();
+        return null;
+      }
+
+      row.orderId = orderId;
+      await queryRunner.manager.save(row);
+      await queryRunner.commitTransaction();
+
+      this.logger.log(
+        `发货领取激活码: ${row.code.slice(0, 8)}*** 类型ID=${typeId} 订单=${orderId}`,
+      );
+      return row.code;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /** 某类型可发放库存（未使用且未绑定订单） */
+  async countUnused(typeId: number, tenantId: number): Promise<number> {
+    return this.codeRepo.count({
+      where: { typeId, tenantId, status: 'unused', orderId: IsNull() },
+    });
   }
 
   // ============ 验证（对外 API） ============
@@ -304,7 +383,9 @@ export class LicenseService {
     for (const t of types) {
       const total = await this.codeRepo.count({ where: { tenantId, typeId: t.id } });
       const active = await this.codeRepo.count({ where: { tenantId, typeId: t.id, status: 'active' } });
-      const unused = await this.codeRepo.count({ where: { tenantId, typeId: t.id, status: 'unused' } });
+      const unused = await this.codeRepo.count({
+        where: { tenantId, typeId: t.id, status: 'unused', orderId: IsNull() },
+      });
       const revoked = await this.codeRepo.count({ where: { tenantId, typeId: t.id, status: 'revoked' } });
       result.push({ typeId: t.id, typeName: t.name, typeCode: t.code, total, active, unused, revoked });
     }

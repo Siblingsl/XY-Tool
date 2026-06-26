@@ -354,8 +354,7 @@ export class DeliveryService {
       }
 
       case 'license': {
-        // 动态申请激活码：付款触发时向激活码中台生成一个码。
-        // 无需 lock/confirm（动态生成不会超发），生成失败走 markFailed。
+        // 优先领库存未使用码，不足则自动生成；不发已激活/已作废/已过期码
         if (!product.licenseTypeCode) {
           return { content: null, kamiItemId: null };
         }

@@ -34,6 +34,13 @@ async function bootstrap() {
     process.exit(1);
   }
 
+  const licenseApiKey = config.get<string>('license.apiKey') || '';
+  if (!licenseApiKey) {
+    logger.warn(
+      'LICENSE_API_KEY 未配置：/api/license/verify 将返回 401，Codex 安装器等外部工具无法激活',
+    );
+  }
+
   // 2. CORS
   app.enableCors({
     origin: config.get<string>('cors.origin'),
