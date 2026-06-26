@@ -143,13 +143,11 @@ export class DeliveryService {
       return { success: false, message: '缺少买家 ID' };
     }
 
-    const { content, kamiItemId } = await this.prepareContent(product, order);
+    const { content, kamiItemId, failReason } = await this.prepareContent(product, order);
     if (!content) {
-      await this.ordersService.markFailed(
-        order.id,
-        '准备发货内容失败（卡密池库存不足）',
-      );
-      return { success: false, message: '卡密库存不足' };
+      const reason = failReason || '准备发货内容失败';
+      await this.ordersService.markFailed(order.id, reason);
+      return { success: false, message: reason };
     }
 
     await this.ordersService.markAssigned(order.id, product.id);
@@ -327,16 +325,20 @@ export class DeliveryService {
   private async prepareContent(
     product: ProductEntity,
     order: OrderEntity,
-  ): Promise<{ content: string | null; kamiItemId: number | null }> {
+  ): Promise<{ content: string | null; kamiItemId: number | null; failReason?: string }> {
     switch (product.deliveryType as DeliveryType) {
       case 'kami': {
-        if (!product.kamiPoolId) return { content: null, kamiItemId: null };
+        if (!product.kamiPoolId) {
+          return { content: null, kamiItemId: null, failReason: '未绑定卡密池' };
+        }
         const kamiItem = await this.kamiPoolService.acquireItem(
           product.kamiPoolId,
           order.id,
           order.tenantId,
         );
-        if (!kamiItem) return { content: null, kamiItemId: null };
+        if (!kamiItem) {
+          return { content: null, kamiItemId: null, failReason: '卡密池库存不足' };
+        }
         const text = [
           kamiItem.content,
           ...(product.remark ? [`\n---\n${product.remark}`] : []),
@@ -346,17 +348,19 @@ export class DeliveryService {
 
       case 'link':
       case 'text': {
+        if (!product.fixedContent?.trim()) {
+          return { content: null, kamiItemId: null, failReason: '未配置固定发货内容' };
+        }
         const text = [
-          product.fixedContent || '',
+          product.fixedContent,
           ...(product.remark ? [`\n---\n${product.remark}`] : []),
         ].join('');
         return { content: text, kamiItemId: null };
       }
 
       case 'license': {
-        // 优先领库存未使用码，不足则自动生成；不发已激活/已作废/已过期码
         if (!product.licenseTypeCode) {
-          return { content: null, kamiItemId: null };
+          return { content: null, kamiItemId: null, failReason: '未配置激活码类型' };
         }
         const licenseCode = await this.licenseService.requestForDelivery(
           product.licenseTypeCode,
@@ -364,17 +368,22 @@ export class DeliveryService {
           order.id,
         );
         if (!licenseCode) {
-          return { content: null, kamiItemId: null };
+          return {
+            content: null,
+            kamiItemId: null,
+            failReason: `激活码分配失败（类型 ${product.licenseTypeCode} 不存在、已禁用或不可用）`,
+          };
         }
         const text = [
           licenseCode,
+          ...(product.fixedContent ? [`\n---\n${product.fixedContent}`] : []),
           ...(product.remark ? [`\n---\n${product.remark}`] : []),
         ].join('');
         return { content: text, kamiItemId: null };
       }
 
       default:
-        return { content: null, kamiItemId: null };
+        return { content: null, kamiItemId: null, failReason: '未知发货方式' };
     }
   }
 

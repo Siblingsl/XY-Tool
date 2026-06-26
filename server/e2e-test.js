@@ -74,6 +74,27 @@ async function main() {
   });
   log('创建商品规则', res);
 
+  // 6b. （可选）创建激活码类型 + license 规则，用于 mock_item_license_001 测试
+  res = await api('POST', '/license/manage/types', {
+    name: 'Codex工具',
+    code: 'codex',
+    durationDays: 365,
+    maxUses: 1,
+    codePrefix: 'CDX',
+  });
+  log('创建激活码类型', res);
+
+  res = await api('POST', '/products', {
+    accountId: 1,
+    itemId: 'mock_item_license_001',
+    title: 'Codex安装配置工具-激活码版',
+    deliveryType: 'license',
+    licenseTypeCode: 'codex',
+    fixedContent: 'https://pan.example.com/s/xxx 提取码：test',
+    remark: '激活码+网盘链接测试',
+  });
+  log('创建 license 商品规则', res);
+
   // 7. 查看列表
   res = await api('GET', '/accounts');
   log('账号列表', res.data?.length ? `共 ${res.data.length} 个` : '空');

@@ -63,7 +63,7 @@ export class ProductEntity extends BaseEntity {
   licenseTypeCode: string | null;
 
   /**
-   * 固定发货内容（deliveryType=link/text 时使用）。
+   * 固定发货内容（deliveryType=link/text 时使用；license 时填网盘地址等）。
    * 例如网盘链接、固定文本说明等。
    */
   @Column({ type: 'text', nullable: true, name: 'fixed_content', comment: '固定发货内容' })

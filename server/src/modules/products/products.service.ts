@@ -1,11 +1,29 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ProductEntity, DeliveryType } from './product.entity';
 
+type ProductInput = {
+  tenantId: number;
+  accountId: number;
+  itemId: string;
+  title: string;
+  deliveryType: DeliveryType;
+  kamiPoolId?: number | null;
+  licenseTypeCode?: string | null;
+  fixedContent?: string | null;
+  remark?: string | null;
+  enabled?: boolean;
+};
+
 /**
  * 商品（发货规则）管理服务。
- * 把闲鱼商品ID 映射到发货规则（发卡密/发链接/发文本）。
+ * 把闲鱼商品ID 映射到发货规则（发卡密/发链接/发文本/发激活码）。
  */
 @Injectable()
 export class ProductsService {
@@ -30,19 +48,12 @@ export class ProductsService {
     });
   }
 
-  async create(input: {
-    tenantId: number;
-    accountId: number;
-    itemId: string;
-    title: string;
-    deliveryType: DeliveryType;
-    kamiPoolId?: number | null;
-    fixedContent?: string | null;
-    remark?: string | null;
-  }): Promise<ProductEntity> {
+  async create(input: ProductInput): Promise<ProductEntity> {
+    const normalized = this.normalizeFields(input);
+    this.validateFields(normalized);
     const entity = this.repo.create({
-      ...input,
-      enabled: true,
+      ...normalized,
+      enabled: input.enabled ?? true,
     });
     const saved = await this.repo.save(entity);
     this.logger.log(`新增商品规则: ${saved.id} (${saved.itemId} → ${saved.deliveryType})`);
@@ -50,7 +61,43 @@ export class ProductsService {
   }
 
   async update(id: number, tenantId: number, patch: Partial<ProductEntity>): Promise<void> {
-    await this.repo.update({ id, tenantId }, patch);
+    const existing = await this.repo.findOne({ where: { id, tenantId } });
+    if (!existing) {
+      throw new NotFoundException('商品规则不存在');
+    }
+
+    const merged: ProductInput = {
+      tenantId: existing.tenantId,
+      accountId: patch.accountId ?? existing.accountId,
+      itemId: patch.itemId ?? existing.itemId,
+      title: patch.title ?? existing.title,
+      deliveryType: (patch.deliveryType ?? existing.deliveryType) as DeliveryType,
+      kamiPoolId: patch.kamiPoolId !== undefined ? patch.kamiPoolId : existing.kamiPoolId,
+      licenseTypeCode:
+        patch.licenseTypeCode !== undefined ? patch.licenseTypeCode : existing.licenseTypeCode,
+      fixedContent: patch.fixedContent !== undefined ? patch.fixedContent : existing.fixedContent,
+      remark: patch.remark !== undefined ? patch.remark : existing.remark,
+      enabled: patch.enabled ?? existing.enabled,
+    };
+
+    const normalized = this.normalizeFields(merged);
+    this.validateFields(normalized);
+
+    const updatePayload: Partial<ProductEntity> = {
+      accountId: normalized.accountId,
+      itemId: normalized.itemId,
+      title: normalized.title,
+      deliveryType: normalized.deliveryType,
+      kamiPoolId: normalized.kamiPoolId,
+      licenseTypeCode: normalized.licenseTypeCode,
+      fixedContent: normalized.fixedContent,
+      remark: normalized.remark,
+    };
+    if (patch.enabled !== undefined) {
+      updatePayload.enabled = patch.enabled;
+    }
+
+    await this.repo.update({ id, tenantId }, updatePayload);
   }
 
   async remove(id: number, tenantId: number): Promise<void> {
@@ -86,5 +133,73 @@ export class ProductsService {
 
   async findById(id: number): Promise<ProductEntity | null> {
     return this.repo.findOne({ where: { id } });
+  }
+
+  private validateFields(product: Pick<ProductInput, 'deliveryType' | 'kamiPoolId' | 'licenseTypeCode' | 'fixedContent'>): void {
+    const dt = product.deliveryType;
+    if (dt === 'kami') {
+      if (!product.kamiPoolId) {
+        throw new BadRequestException('卡密发货需选择卡密池');
+      }
+      return;
+    }
+    if (dt === 'link' || dt === 'text') {
+      if (!product.fixedContent?.trim()) {
+        throw new BadRequestException('需填写固定发货内容');
+      }
+      return;
+    }
+    if (dt === 'license') {
+      if (!product.licenseTypeCode?.trim()) {
+        throw new BadRequestException('激活码发货需选择激活码类型');
+      }
+      if (!product.fixedContent?.trim()) {
+        throw new BadRequestException('激活码发货需填写网盘地址或下载链接');
+      }
+    }
+  }
+
+  /** 按发货方式清理无关字段，避免切换类型后残留旧配置 */
+  private normalizeFields(input: ProductInput): Omit<ProductInput, 'enabled'> {
+    const base = {
+      tenantId: input.tenantId,
+      accountId: input.accountId,
+      itemId: input.itemId,
+      title: input.title,
+      deliveryType: input.deliveryType,
+      remark: input.remark?.trim() || null,
+    };
+
+    switch (input.deliveryType) {
+      case 'kami':
+        return {
+          ...base,
+          kamiPoolId: input.kamiPoolId ?? null,
+          licenseTypeCode: null,
+          fixedContent: null,
+        };
+      case 'link':
+      case 'text':
+        return {
+          ...base,
+          kamiPoolId: null,
+          licenseTypeCode: null,
+          fixedContent: input.fixedContent?.trim() || null,
+        };
+      case 'license':
+        return {
+          ...base,
+          kamiPoolId: null,
+          licenseTypeCode: input.licenseTypeCode?.trim() || null,
+          fixedContent: input.fixedContent?.trim() || null,
+        };
+      default:
+        return {
+          ...base,
+          kamiPoolId: input.kamiPoolId ?? null,
+          licenseTypeCode: input.licenseTypeCode ?? null,
+          fixedContent: input.fixedContent ?? null,
+        };
+    }
   }
 }

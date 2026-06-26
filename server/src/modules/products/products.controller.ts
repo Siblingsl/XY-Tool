@@ -48,7 +48,7 @@ export class CreateProductDto {
   @IsOptional()
   licenseTypeCode?: string;
 
-  @ApiProperty({ description: '固定发货内容（deliveryType=link/text 时填）', required: false })
+  @ApiProperty({ description: '固定发货内容（link/text 必填；license 时填网盘地址等）', required: false })
   @IsString()
   @IsOptional()
   fixedContent?: string;
@@ -60,6 +60,17 @@ export class CreateProductDto {
 }
 
 export class UpdateProductDto {
+  @ApiProperty({ description: '关联的闲鱼账号ID', required: false })
+  @IsNumber()
+  @IsOptional()
+  @Type(() => Number)
+  accountId?: number;
+
+  @ApiProperty({ description: '闲鱼商品ID', required: false })
+  @IsString()
+  @IsOptional()
+  itemId?: string;
+
   @ApiProperty({ description: '商品标题', required: false })
   @IsString()
   @IsOptional()

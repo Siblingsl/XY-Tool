@@ -162,6 +162,7 @@ export class OrderPollingService {
       { itemId: 'mock_item_kami_001', title: 'Steam游戏CDK-赛博朋克2077' },
       { itemId: 'mock_item_link_001', title: 'PS5教程资料包-网盘链接' },
       { itemId: 'mock_item_text_001', title: 'ChatGPT Plus 合租账号' },
+      { itemId: 'mock_item_license_001', title: 'Codex安装配置工具-激活码版' },
     ];
     const item = mockItems[this.mockCounter % mockItems.length];
     const mockBuyers = ['测试买家A', '虚拟用户B', '联调用户C'];

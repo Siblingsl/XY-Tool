@@ -15,13 +15,14 @@ import {
   Typography,
   Image,
   Empty,
+  Tooltip,
 } from 'antd';
 import { PlusOutlined, ReloadOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import api from '../api';
 
 /**
  * 商品发货规则管理页。
- * 把闲鱼商品ID 映射到发货方式（卡密/链接/文本）。
+ * 把闲鱼商品ID 映射到发货方式（卡密/链接/文本/激活码）。
  */
 export default function Products() {
   const [data, setData] = useState<any[]>([]);
@@ -30,6 +31,7 @@ export default function Products() {
   const [licenseTypes, setLicenseTypes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
   const [form] = Form.useForm();
 
   // 拉取在售商品弹窗状态
@@ -64,17 +66,48 @@ export default function Products() {
     refresh();
   }, []);
 
-  const handleAdd = async () => {
+  const closeModal = () => {
+    setModalOpen(false);
+    setEditId(null);
+    form.resetFields();
+  };
+
+  const openAddModal = () => {
+    setEditId(null);
+    form.resetFields();
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
     const values = await form.validateFields();
     try {
-      await api.post('/products', values);
-      message.success('添加成功');
-      setModalOpen(false);
-      form.resetFields();
+      if (editId) {
+        await api.put(`/products/${editId}`, values);
+        message.success('已更新');
+      } else {
+        await api.post('/products', values);
+        message.success('添加成功');
+      }
+      closeModal();
       refresh();
     } catch (e) {
       message.error((e as Error).message);
     }
+  };
+
+  const handleEdit = (row: any) => {
+    setEditId(row.id);
+    form.setFieldsValue({
+      accountId: row.accountId,
+      itemId: row.itemId,
+      title: row.title,
+      deliveryType: row.deliveryType,
+      kamiPoolId: row.kamiPoolId ?? undefined,
+      licenseTypeCode: row.licenseTypeCode ?? undefined,
+      fixedContent: row.fixedContent ?? undefined,
+      remark: row.remark ?? undefined,
+    });
+    setModalOpen(true);
   };
 
   const handleToggle = async (id: number, enabled: boolean) => {
@@ -121,7 +154,6 @@ export default function Products() {
     setFetchPage(1);
     setFetchHasNext(false);
     setFetchModalOpen(true);
-    // 默认选第一个账号并拉取
     if (accounts.length > 0 && fetchAccountId == null) {
       const firstId = accounts[0].id;
       setFetchAccountId(firstId);
@@ -138,6 +170,7 @@ export default function Products() {
 
   /** 把在售商品导入为发货规则：自动填 itemId/title，打开规则表单 */
   const handleImportToRule = (item: any) => {
+    setEditId(null);
     form.setFieldsValue({
       itemId: item.itemId,
       title: item.title,
@@ -160,13 +193,25 @@ export default function Products() {
     license: '发激活码',
   };
 
+  const renderEllipsis = (text: string | null | undefined, width = 180) => {
+    if (!text) return <Typography.Text type="secondary">-</Typography.Text>;
+    return (
+      <Tooltip title={text}>
+        <Typography.Text ellipsis style={{ maxWidth: width, display: 'inline-block' }}>
+          {text}
+        </Typography.Text>
+      </Tooltip>
+    );
+  };
+
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 60 },
-    { title: '商品ID', dataIndex: 'itemId' },
-    { title: '商品标题', dataIndex: 'title' },
+    { title: '商品ID', dataIndex: 'itemId', width: 130 },
+    { title: '商品标题', dataIndex: 'title', ellipsis: true },
     {
       title: '发货方式',
       dataIndex: 'deliveryType',
+      width: 120,
       render: (t: string, row: any) => (
         <Space direction="vertical" size={0}>
           <Tag color="blue">{deliveryTypeText[t] || t}</Tag>
@@ -175,27 +220,114 @@ export default function Products() {
               {licenseTypes.find((lt) => lt.code === row.licenseTypeCode)?.name || row.licenseTypeCode}
             </Typography.Text>
           )}
+          {t === 'kami' && row.kamiPoolId && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {pools.find((p) => p.id === row.kamiPoolId)?.name || `池 #${row.kamiPoolId}`}
+            </Typography.Text>
+          )}
         </Space>
       ),
     },
     {
+      title: '发货内容',
+      dataIndex: 'fixedContent',
+      render: (v: string, row: any) => renderEllipsis(v || (row.deliveryType === 'kami' ? null : v), 200),
+    },
+    {
+      title: '附言',
+      dataIndex: 'remark',
+      width: 140,
+      render: (v: string) => renderEllipsis(v, 120),
+    },
+    {
       title: '启用',
       dataIndex: 'enabled',
+      width: 70,
       render: (e: boolean, row: any) => (
         <Switch checked={e} onChange={(v) => handleToggle(row.id, v)} />
       ),
     },
     {
       title: '操作',
+      width: 120,
       render: (_: any, row: any) => (
-        <Popconfirm title="确定删除？" onConfirm={() => handleDelete(row.id)}>
-          <Button size="small" danger>
-            删除
+        <Space size="small">
+          <Button size="small" onClick={() => handleEdit(row)}>
+            编辑
           </Button>
-        </Popconfirm>
+          <Popconfirm title="确定删除？" onConfirm={() => handleDelete(row.id)}>
+            <Button size="small" danger>
+              删除
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
+
+  const renderDeliveryFields = (dt: string) => {
+    if (dt === 'kami') {
+      return (
+        <Form.Item name="kamiPoolId" label="卡密池" rules={[{ required: true, message: '请选择卡密池' }]}>
+          <Select
+            placeholder="选择卡密池"
+            options={pools.map((p) => ({ value: p.id, label: p.name }))}
+          />
+        </Form.Item>
+      );
+    }
+    if (dt === 'license') {
+      const enabledTypes = licenseTypes.filter((t) => t.enabled !== false);
+      return (
+        <>
+          <Form.Item
+            name="licenseTypeCode"
+            label="激活码类型"
+            rules={[{ required: true, message: '请选择激活码类型' }]}
+            extra={
+              enabledTypes.length === 0 ? (
+                <Typography.Text type="warning">
+                  暂无激活码类型，请先在「激活码 → 类型管理」中创建
+                </Typography.Text>
+              ) : (
+                <Typography.Text type="secondary">
+                  优先发放库存中的未使用码；库存不足时自动生成。已激活的码不会发出。
+                </Typography.Text>
+              )
+            }
+          >
+            <Select
+              placeholder="选择激活码类型"
+              showSearch
+              optionFilterProp="label"
+              options={enabledTypes.map((t) => ({
+                value: t.code,
+                label: `${t.name}（${t.code}）· 库存 ${t.unusedStock ?? 0}`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="fixedContent"
+            label="文件、软件、工具、资源及其他网盘地址 / 下载链接"
+            rules={[{ required: true, message: '请填写网盘或工具下载地址' }]}
+          >
+            <Input.TextArea
+              rows={3}
+              placeholder="如：https://pan.baidu.com/s/xxx 提取码：xxxx"
+            />
+          </Form.Item>
+        </>
+      );
+    }
+    if (dt === 'link' || dt === 'text') {
+      return (
+        <Form.Item name="fixedContent" label="固定内容" rules={[{ required: true, message: '请填写固定内容' }]}>
+          <Input.TextArea rows={4} placeholder="链接或文本内容" />
+        </Form.Item>
+      );
+    }
+    return null;
+  };
 
   return (
     <div>
@@ -213,21 +345,22 @@ export default function Products() {
             >
               从闲鱼拉取商品
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
               添加规则
             </Button>
           </Space>
         }
       >
-        <Table rowKey="id" columns={columns} dataSource={data} loading={loading} />
+        <Table rowKey="id" columns={columns} dataSource={data} loading={loading} scroll={{ x: 1100 }} />
       </Card>
 
       <Modal
-        title="添加发货规则"
+        title={editId ? '编辑发货规则' : '添加发货规则'}
         open={modalOpen}
-        onOk={handleAdd}
-        onCancel={() => setModalOpen(false)}
+        onOk={handleSave}
+        onCancel={closeModal}
         width={600}
+        destroyOnClose
       >
         <Form form={form} layout="vertical">
           <Form.Item name="accountId" label="闲鱼账号" rules={[{ required: true }]}>
@@ -257,55 +390,7 @@ export default function Products() {
             noStyle
             shouldUpdate={(prev, cur) => prev.deliveryType !== cur.deliveryType}
           >
-            {({ getFieldValue }) => {
-              const dt = getFieldValue('deliveryType');
-              if (dt === 'kami') {
-                return (
-                  <Form.Item name="kamiPoolId" label="卡密池" rules={[{ required: true }]}>
-                    <Select
-                      placeholder="选择卡密池"
-                      options={pools.map((p) => ({ value: p.id, label: p.name }))}
-                    />
-                  </Form.Item>
-                );
-              }
-              if (dt === 'license') {
-                const enabledTypes = licenseTypes.filter((t) => t.enabled !== false);
-                return (
-                  <Form.Item
-                    name="licenseTypeCode"
-                    label="激活码类型"
-                    rules={[{ required: true, message: '请选择激活码类型' }]}
-                    extra={
-                      enabledTypes.length === 0 ? (
-                        <Typography.Text type="warning">
-                          暂无激活码类型，请先在「激活码 → 类型管理」中创建
-                        </Typography.Text>
-                      ) : (
-                        <Typography.Text type="secondary">
-                          优先发放库存中的未使用码；库存不足时自动生成。已激活的码不会发出。
-                        </Typography.Text>
-                      )
-                    }
-                  >
-                    <Select
-                      placeholder="选择激活码类型"
-                      showSearch
-                      optionFilterProp="label"
-                      options={enabledTypes.map((t) => ({
-                        value: t.code,
-                        label: `${t.name}（${t.code}）· 库存 ${t.unusedStock ?? 0}`,
-                      }))}
-                    />
-                  </Form.Item>
-                );
-              }
-              return (
-                <Form.Item name="fixedContent" label="固定内容" rules={[{ required: true }]}>
-                  <Input.TextArea rows={4} placeholder="链接或文本内容" />
-                </Form.Item>
-              );
-            }}
+            {({ getFieldValue }) => renderDeliveryFields(getFieldValue('deliveryType'))}
           </Form.Item>
           <Form.Item name="remark" label="发货附言（可选）">
             <Input.TextArea rows={2} placeholder="如：有问题联系客服" />
