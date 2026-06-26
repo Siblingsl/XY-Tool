@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { DataSource } from 'typeorm';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 
@@ -27,6 +28,7 @@ describe('AuthService', () => {
   };
   let jwtService: { sign: jest.Mock; verify: jest.Mock };
   let configService: { get: jest.Mock };
+  let dataSource: { transaction: jest.Mock };
 
   beforeEach(async () => {
     usersService = {
@@ -45,12 +47,16 @@ describe('AuthService', () => {
     configService = {
       get: jest.fn((key: string) => {
         const map: Record<string, unknown> = {
+          'jwt.secret': 'jwt-secret',
           'jwt.expiresIn': '7d',
           'jwt.refreshExpiresIn': '30d',
           'jwt.refreshSecret': 'refresh-secret',
         };
         return map[key];
       }),
+    };
+    dataSource = {
+      transaction: jest.fn(),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -59,6 +65,7 @@ describe('AuthService', () => {
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: jwtService },
         { provide: ConfigService, useValue: configService },
+        { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
 
