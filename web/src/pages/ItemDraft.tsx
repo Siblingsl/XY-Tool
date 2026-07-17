@@ -50,8 +50,8 @@ export default function ItemDraft() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const drafts = await api.get('/item-drafts');
-      setList((drafts as any[]) || []);
+      const drafts = await api.get<any[]>('/item-drafts');
+      setList(Array.isArray(drafts) ? drafts : []);
     } catch (e) {
       message.error((e as Error).message);
     } finally {

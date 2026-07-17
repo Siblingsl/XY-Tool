@@ -34,11 +34,10 @@ export default function ListingRewrite() {
 
   const loadAccounts = async () => {
     try {
-      const accs = await api.get('/accounts');
+      const accs = await api.get<any[]>('/accounts');
+      const list = Array.isArray(accs) ? accs : [];
       setAccounts(
-        ((accs as any[]) || []).filter(
-          (a) => a.enabled && a.status === 'active',
-        ),
+        list.filter((a) => a.enabled && a.status === 'active'),
       );
     } catch (e) {
       message.error((e as Error).message);
