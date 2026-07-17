@@ -186,6 +186,16 @@ export default function Accounts() {
     }
   };
 
+  const handleToggleAutoConfirm = async (id: number, autoConfirm: boolean) => {
+    try {
+      await api.put(`/accounts/${id}/auto-confirm`, { autoConfirm });
+      message.success(autoConfirm ? '已开启自动确认发货' : '已关闭自动确认发货');
+      refresh();
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
   const statusColor: Record<string, string> = {
     active: 'success',
     expired: 'warning',
@@ -194,6 +204,18 @@ export default function Accounts() {
   };
 
   const expiredCount = data.filter((r) => r.status === 'expired').length;
+  const captchaPausedList = data.filter((r) => r.captchaPaused);
+  const captchaCount = captchaPausedList.length;
+
+  const handleClearCaptcha = async (id: number) => {
+    try {
+      await api.post(`/accounts/${id}/clear-captcha-pause`);
+      message.success('已清除冷静期');
+      refresh();
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
 
   const handleHealthCheck = async (id: number) => {
     try {
@@ -245,10 +267,17 @@ export default function Accounts() {
     {
       title: '状态',
       dataIndex: 'status',
-      render: (s: string) => (
-        <Tag color={statusColor[s] || 'default'}>
-          {s === 'expired' ? '已过期' : s}
-        </Tag>
+      render: (s: string, row: any) => (
+        <Space size={4} wrap>
+          <Tag color={statusColor[s] || 'default'}>
+            {s === 'expired' ? '已过期' : s}
+          </Tag>
+          {row.captchaPaused && (
+            <Tag color="orange">
+              风控冷静约 {row.captchaPauseRemainingMin || 1} 分钟
+            </Tag>
+          )}
+        </Space>
       ),
     },
     {
@@ -260,6 +289,18 @@ export default function Accounts() {
           checked={enabled}
           size="small"
           onChange={(checked) => handleToggleEnabled(row.id, checked)}
+        />
+      ),
+    },
+    {
+      title: '自动确认发货',
+      dataIndex: 'autoConfirm',
+      width: 120,
+      render: (autoConfirm: boolean, row: any) => (
+        <Switch
+          checked={!!autoConfirm}
+          size="small"
+          onChange={(checked) => handleToggleAutoConfirm(row.id, checked)}
         />
       ),
     },
@@ -282,6 +323,11 @@ export default function Accounts() {
             >
               <Button size="small">续期</Button>
             </Popconfirm>
+          )}
+          {row.captchaPaused && (
+            <Button size="small" type="primary" ghost onClick={() => handleClearCaptcha(row.id)}>
+              解除冷静
+            </Button>
           )}
           <Button size="small" onClick={() => startQrLogin(row.id)}>
             扫码更新
@@ -308,6 +354,24 @@ export default function Accounts() {
           showIcon
           style={{ marginBottom: 16 }}
           message={`有 ${expiredCount} 个账号 Cookie 已过期，请重新扫码登录`}
+        />
+      )}
+      {captchaCount > 0 && (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={`有 ${captchaCount} 个账号触发闲鱼风控，系统已暂停拉单/WS（防止连续撞接口）`}
+          description={
+            <div>
+              {captchaPausedList.map((r) => (
+                <div key={r.id}>
+                  账号 {r.id}「{r.nickname}」约剩 {r.captchaPauseRemainingMin || 1}{' '}
+                  分钟 — 可点「解除冷静」或重新扫码；网页端不一定会弹出滑块。
+                </div>
+              ))}
+            </div>
+          }
         />
       )}
       <Card

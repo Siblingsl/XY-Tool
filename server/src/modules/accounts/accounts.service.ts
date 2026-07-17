@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { XianyuAccountEntity } from './account.entity';
 import { decrypt, encrypt } from '../../common/utils/crypto.util';
 import { isGoofishSessionExpired } from '../../goofish/goofish-error.util';
+import { globalRiskGuard } from '../../common/utils/risk-control.util';
 import { RealtimeService } from '../realtime/realtime.service';
 
 /**
@@ -32,6 +33,29 @@ export class AccountsService {
     return this.repo.find({
       where: { tenantId },
       order: { createdAt: 'DESC' },
+    });
+  }
+
+  /** 兼容旧接口：冷静期已取消 */
+  async clearCaptchaPause(id: number, tenantId: number): Promise<void> {
+    const account = await this.findById(id, tenantId);
+    if (!account) throw new Error('账号不存在');
+    globalRiskGuard.clearCaptchaPause(id);
+  }
+
+  /** 兼容旧接口：仅推送提示，不暂停业务 */
+  notifyCaptchaPaused(
+    tenantId: number,
+    accountId: number,
+    _pauseUntil: number,
+    nickname?: string,
+  ): void {
+    this.realtime.pushAccountCaptcha(tenantId, {
+      accountId,
+      nickname,
+      pauseUntil: Date.now(),
+      remainingMs: 0,
+      message: `账号${nickname ? `「${nickname}」` : ` ${accountId}`} 收到闲鱼风控提示，系统未暂停，将自动重试。`,
     });
   }
 
@@ -160,6 +184,19 @@ export class AccountsService {
     }
     await this.repo.update(id, { enabled });
     return { ...account, enabled };
+  }
+
+  async setAutoConfirm(
+    id: number,
+    tenantId: number,
+    autoConfirm: boolean,
+  ): Promise<XianyuAccountEntity> {
+    const account = await this.findById(id, tenantId);
+    if (!account) {
+      throw new Error('账号不存在');
+    }
+    await this.repo.update(id, { autoConfirm });
+    return { ...account, autoConfirm };
   }
 
   /** 删除账号 */

@@ -612,14 +612,28 @@ class GoofishClient {
   }
 
   /**
-   * 发布商品
+   * 组装发布/草稿共用 payload（上传图片、分类推荐、地址）
    * @param {object} opts
-   * @param {string[]} [opts.imagePaths]
-   * @param {string} opts.goodsDesc
+   * @param {string[]} [opts.imagePaths] 本地图片路径
+   * @param {Array<{url:string,width?:number,height?:number}>} [opts.imageInfos] 已上传 CDN 图
+   * @param {string} opts.goodsDesc 描述（可含标题）
+   * @param {string} [opts.title] 标题（可选，默认用描述前 30 字）
    * @param {{ currentPrice?: number, originalPrice?: number } | null} [opts.price]
-   * @param {{ choice: string, postPrice?: number, canSelfPickup?: boolean }} opts.delivery
+   * @param {{ choice?: string, postPrice?: number, canSelfPickup?: boolean }} [opts.delivery]
    */
-  async publishItem({ imagePaths = [], goodsDesc, price = null, delivery }) {
+  async _buildItemPublishData({
+    imagePaths = [],
+    imageInfos = [],
+    goodsDesc,
+    title,
+    price = null,
+    delivery = {},
+  }) {
+    const desc = String(goodsDesc || '').trim();
+    if (!desc) throw new Error('商品描述不能为空');
+
+    const titleText = String(title || desc).trim().slice(0, 60) || desc.slice(0, 60);
+
     const data = {
       freebies: false,
       itemTypeStr: 'b',
@@ -627,9 +641,9 @@ class GoofishClient {
       simpleItem: 'true',
       imageInfoDOList: [],
       itemTextDTO: {
-        desc: goodsDesc,
-        title: goodsDesc,
-        titleDescSeparate: false,
+        desc,
+        title: titleText,
+        titleDescSeparate: !!title && title !== desc,
       },
       itemLabelExtList: [],
       itemPriceDTO: {},
@@ -648,18 +662,29 @@ class GoofishClient {
       publishScene: 'pcMainPublish',
     };
 
-    const imagesInfo = [];
+    const imagesInfo = [...imageInfos];
     for (const p of imagePaths) {
       const up = await this.uploadMedia(p);
-      const obj = up.object;
-      const [w, h] = obj.pix.split('x').map(Number);
-      imagesInfo.push({ url: obj.url, width: w, height: h });
+      const obj = up?.object;
+      if (!obj?.url) {
+        throw new Error(`图片上传失败: ${path.basename(String(p))}`);
+      }
+      const pix = String(obj.pix || '800x800');
+      const [w, h] = pix.split('x').map(Number);
+      imagesInfo.push({ url: obj.url, width: w || 800, height: h || 800 });
+    }
+
+    if (imagesInfo.length === 0) {
+      throw new Error('至少需要 1 张商品图片');
+    }
+
+    for (const img of imagesInfo) {
       data.imageInfoDOList.push({
         extraInfo: { isH: 'false', isT: 'false', raw: 'false' },
         isQrCode: false,
-        url: obj.url,
-        heightSize: h,
-        widthSize: w,
+        url: img.url,
+        heightSize: img.height || 800,
+        widthSize: img.width || 800,
         major: true,
         type: 0,
         status: 'done',
@@ -695,7 +720,8 @@ class GoofishClient {
       data.defaultPrice = true;
     }
 
-    const channelRes = await this.getPublicChannel(goodsDesc, imagesInfo);
+    const channelTitle = titleText || desc;
+    const channelRes = await this.getPublicChannel(channelTitle, imagesInfo);
     const cardList = channelRes?.data?.cardList || [];
     for (const card of cardList) {
       const cardData = card.cardData || {};
@@ -728,10 +754,10 @@ class GoofishClient {
 
     const pred = channelRes?.data?.categoryPredictResult || {};
     data.itemCatDTO = {
-      catId: String(pred.catId),
-      catName: String(pred.catName),
-      channelCatId: String(pred.channelCatId),
-      tbCatId: String(pred.tbCatId),
+      catId: String(pred.catId || ''),
+      catName: String(pred.catName || ''),
+      channelCatId: String(pred.channelCatId || ''),
+      tbCatId: String(pred.tbCatId || ''),
     };
 
     const locRes = await this.getDefaultLocation();
@@ -748,10 +774,47 @@ class GoofishClient {
       };
     }
 
+    return { data, imagesInfo, rawChannel: channelRes, rawLocation: locRes };
+  }
+
+  /**
+   * 正式发布商品（上架）— 业务层默认不要直接暴露给前端。
+   */
+  async publishItem(opts) {
+    const { data } = await this._buildItemPublishData(opts);
     return this.mtopPost('mtop.idle.pc.idleitem.publish', data, {
       v: '1.0',
       spm_cnt: 'a21ybx.publish.0.0',
     });
+  }
+
+  /**
+   * 推送商品到闲鱼。
+   *
+   * 说明（对齐 XianYuApis-master）：
+   * - 公开可用接口只有 `mtop.idle.pc.idleitem.publish`（正式发布）
+   * - 不存在稳定的「仅存草稿」mtop API（draft.save 会 FAIL_SYS_API_NOT_FOUND）
+   * - 因此本方法与 publishItem 使用同一接口与 payload
+   *
+   * @returns mtop 原始响应；成功时 ret 以 SUCCESS:: 开头
+   */
+  async saveItemDraft(opts) {
+    const { data, imagesInfo } = await this._buildItemPublishData(opts);
+    const api = 'mtop.idle.pc.idleitem.publish';
+    const res = await this.mtopPost(api, data, {
+      v: '1.0',
+      spm_cnt: 'a21ybx.publish.0.0',
+    });
+    const ret = res?.ret?.[0] || '';
+    if (!String(ret).startsWith('SUCCESS::')) {
+      const err = new Error(ret || `${api} 失败`);
+      err.raw = res;
+      throw err;
+    }
+    return {
+      ...res,
+      _meta: { api, imagesInfo, draftMode: false, livePublish: true },
+    };
   }
 }
 

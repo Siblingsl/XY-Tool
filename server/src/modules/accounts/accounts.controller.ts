@@ -79,6 +79,13 @@ export class SetAccountEnabledDto {
   enabled: boolean;
 }
 
+/** 账号自动确认发货 DTO */
+export class SetAutoConfirmDto {
+  @ApiProperty({ description: 'IM发货后是否调用闲鱼确认发货' })
+  @IsBoolean()
+  autoConfirm: boolean;
+}
+
 /** 拉取在售商品分页 DTO */
 export class ItemsQueryDto {
   @ApiProperty({ description: '页码（从1开始）', required: false, default: 1 })
@@ -178,6 +185,24 @@ export class AccountsController {
     }
   }
 
+  @Put(':id/auto-confirm')
+  @ApiOperation({ summary: '设置账号是否自动确认闲鱼发货状态' })
+  async setAutoConfirm(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: SetAutoConfirmDto,
+  ) {
+    try {
+      return await this.service.setAutoConfirm(
+        Number(id),
+        user.tenantId,
+        dto.autoConfirm,
+      );
+    } catch {
+      throw new NotFoundException('账号不存在');
+    }
+  }
+
   @Post(':id/health-check')
   @ApiOperation({ summary: '主动检测 Cookie 是否有效' })
   async healthCheck(
@@ -189,6 +214,24 @@ export class AccountsController {
       throw new NotFoundException('账号不存在');
     }
     return this.cookieHealth.checkOne(Number(id));
+  }
+
+  @Post(':id/clear-captcha-pause')
+  @ApiOperation({
+    summary: '清除滑块冷静期',
+    description:
+      '解除本系统对该账号的风控暂停（进程内）。若闲鱼侧仍拦截，需浏览器过码或重新扫码。',
+  })
+  async clearCaptchaPause(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
+    try {
+      await this.service.clearCaptchaPause(Number(id), user.tenantId);
+      return { ok: true, message: '已清除冷静期，将重新尝试拉单/WS' };
+    } catch {
+      throw new NotFoundException('账号不存在');
+    }
   }
 
   /**

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { isMtopSuccess, loadGoofishSdk } from './goofish-sdk.loader';
+import { isGoofishCaptchaFromRet } from './goofish-error.util';
 import type {
   GoofishClientInstance,
   GoofishMtopRawResponse,
@@ -32,6 +33,10 @@ export class GoofishSdkService implements OnModuleInit {
   assertMtopSuccess<T>(res: GoofishMtopRawResponse<T>, api: string): T {
     if (!isMtopSuccess(res)) {
       const code = res.ret?.[0] || 'UNKNOWN';
+      // 仅提醒，不改错误形态、不触发冷静期
+      if (isGoofishCaptchaFromRet(res.ret)) {
+        this.logger.warn(`mtop ${api} 风控响应: ${code}`);
+      }
       throw new Error(`goofish mtop ${api} 失败: ${code}`);
     }
     return res.data as T;

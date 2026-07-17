@@ -24,6 +24,9 @@ import { AdminModule } from './modules/admin/admin.module';
 import { RedisModule } from './modules/redis/redis.module';
 import { AutoReplyModule } from './modules/auto-reply/auto-reply.module';
 import { LicenseModule } from './modules/license/license.module';
+import { ItemDraftModule } from './modules/item-draft/item-draft.module';
+import { ListingRewriteModule } from './modules/listing-rewrite/listing-rewrite.module';
+import { AiModule } from './modules/ai/ai.module';
 import { SignModule } from './modules/sign/sign.module';
 import { XianyuModule } from './xianyu/xianyu.module';
 
@@ -115,8 +118,11 @@ import { XianyuModule } from './xianyu/xianyu.module';
     RealtimeModule,
     StatsModule,
     AdminModule,
+    AiModule,
     AutoReplyModule,
     LicenseModule,
+    ItemDraftModule,
+    ListingRewriteModule,
   ],
   providers: [
     // 全局限流守卫：未显式 @SkipThrottle() 的路由都会被限流

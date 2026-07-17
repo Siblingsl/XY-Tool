@@ -52,3 +52,4 @@ redis-data/
 *.pem
 *.key
 secrets/
+Reference_Projects/

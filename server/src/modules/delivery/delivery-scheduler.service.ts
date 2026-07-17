@@ -49,28 +49,39 @@ export class DeliverySchedulerService {
       for (const order of orders) {
         const jobId = `delivery:${order.id}`;
 
-        // 检查队列中是否已有同 orderId 的等待/活跃任务
+        // Bull 固定 jobId 时，completed/failed 残留会阻止再次入队 → 自动发货卡死
         const existing = await this.deliveryQueue.getJob(jobId);
         if (existing) {
           const state = await existing.getState();
           if (state === 'waiting' || state === 'active' || state === 'delayed') {
             continue;
           }
+          try {
+            await existing.remove();
+          } catch {
+            /* 竞态下可能已被清理 */
+          }
         }
 
-        await this.deliveryQueue.add(
-          { orderId: order.id, tenantId: order.tenantId },
-          {
-            jobId,
-            attempts: 1,             // 不重试—processOrder 内部有重试机制
-            removeOnComplete: 100,   // 保留最近 100 个完成记录
-            removeOnFail: 50,        // 保留最近 50 个失败记录
-          },
-        );
+        try {
+          await this.deliveryQueue.add(
+            { orderId: order.id, tenantId: order.tenantId },
+            {
+              jobId,
+              attempts: 1, // 不重试—processOrder 内部有重试机制
+              removeOnComplete: true, // 完成后立刻移除，避免 jobId 占位
+              removeOnFail: true,
+            },
+          );
 
-        this.logger.log(
-          `入队订单: ${order.bizOrderId} (${order.retryCount > 0 ? '重试' : '新订单'})`,
-        );
+          this.logger.log(
+            `入队订单: ${order.bizOrderId} (${order.retryCount > 0 ? '重试' : '新订单'})`,
+          );
+        } catch (addErr) {
+          this.logger.warn(
+            `入队失败 ${order.bizOrderId}: ${(addErr as Error).message}`,
+          );
+        }
       }
     } catch (err) {
       this.logger.error(`订单扫描异常: ${(err as Error).message}`);

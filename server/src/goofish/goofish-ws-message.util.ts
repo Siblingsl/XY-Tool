@@ -1,13 +1,33 @@
 import { decryptGoofishMessage, decryptGoofishObject } from './goofish-crypto.util';
 import { loadGoofishSdk } from './goofish-sdk.loader';
 
-/** 付款后待发货的系统消息（xianyu-auto-reply 同款） */
+/** 付款后待发货的系统消息（参考 xianyu-auto-reply / super-butler） */
 export const PAID_ORDER_MESSAGES = new Set([
   '[我已付款，等待你发货]',
   '[买家已付款]',
   '[付款完成]',
   '[已付款，待发货]',
+  '[记得及时发货]',
+  '我已付款，等待你发货',
+  '已付款，待发货',
+  '买家已付款',
 ]);
+
+/** 宽松命中：content 包含任一关键字即视为付款触发 */
+export function isPaidOrderMessage(content: string): boolean {
+  if (!content) return false;
+  if (PAID_ORDER_MESSAGES.has(content)) return true;
+  for (const k of PAID_ORDER_MESSAGES) {
+    if (content.includes(k.replace(/^\[|\]$/g, '')) || content.includes(k)) {
+      return true;
+    }
+  }
+  // 兜底语义
+  if (content.includes('已付款') && (content.includes('发货') || content.includes('待发货'))) {
+    return true;
+  }
+  return false;
+}
 
 /**
  * 退款相关系统消息（xianyu-auto-reply 同款模板）。
@@ -313,7 +333,7 @@ export function tryParsePaymentEvent(
   parsed: ParsedImChatMessage,
   sellerUserId: string,
 ): PaymentMessageEvent | null {
-  if (!PAID_ORDER_MESSAGES.has(parsed.content)) return null;
+  if (!isPaidOrderMessage(parsed.content)) return null;
   if (parsed.sendUserId === sellerUserId) return null;
 
   const bizOrderId = extractOrderId(parsed.rawMessage);
@@ -378,7 +398,7 @@ export function tryParseChatMessage(
   const content = (parsed.content || '').trim();
   if (!content) return null;
   // 排除付款/退款消息（交给专门的处理函数）
-  if (PAID_ORDER_MESSAGES.has(parsed.content)) return null;
+  if (isPaidOrderMessage(parsed.content)) return null;
   if (REFUND_MESSAGES.has(parsed.content)) return null;
   // 必须有会话ID才能回复
   if (!parsed.conversationId) return null;

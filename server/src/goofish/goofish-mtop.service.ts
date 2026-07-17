@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
-import { isGoofishSessionExpiredFromRet } from './goofish-error.util';
+import {
+  isGoofishCaptchaFromRet,
+  isGoofishSessionExpiredFromRet,
+} from './goofish-error.util';
 import {
   GOOFISH_APP_KEY,
   GOOFISH_MTOP_BASE,
@@ -151,6 +154,9 @@ export class GoofishMtopService {
         this.logger.warn('订单拉取令牌过期，刷新 Cookie 后重试');
         return this.fetchSoldOrdersOnce(updatedJar, pageNumber, rowsPerPage, queryCode, true);
       }
+      if (isGoofishCaptchaFromRet(json.ret)) {
+        this.logger.warn(`订单拉取风控响应: ${ret}`);
+      }
       if (isGoofishSessionExpiredFromRet(json.ret)) {
         throw new Error(ret || 'FAIL_SYS_SESSION_EXPIRED');
       }
@@ -202,6 +208,13 @@ export class GoofishMtopService {
     buyerId?: string;
     buyerNick?: string;
     amount?: number;
+    quantity?: number;
+    specName?: string;
+    specValue?: string;
+    receiverName?: string;
+    receiverPhone?: string;
+    receiverAddress?: string;
+    xyStatus?: string;
   }> {
     const { data, cookie: updatedCookie } = await this.sdkService.mtop<Record<string, unknown>>(
       cookie,
@@ -214,30 +227,136 @@ export class GoofishMtopService {
     let itemId = '';
     let itemTitle = '';
     let amount: number | undefined;
+    let quantity = 1;
+    let specName = '';
+    let specValue = '';
+    let buyerId = '';
+    let buyerNick = '';
+    let receiverName = '';
+    let receiverPhone = '';
+    let receiverAddress = '';
+    let xyStatus = '';
+
+    const dig = (obj: unknown, keys: string[]): unknown => {
+      let cur: any = obj;
+      for (const k of keys) {
+        if (cur == null || typeof cur !== 'object') return undefined;
+        cur = cur[k];
+      }
+      return cur;
+    };
 
     for (const comp of components) {
-      if (String(comp.render ?? '') === 'orderInfoVO') {
-        const compData = (comp.data as Record<string, unknown>) || {};
-        const info = (compData.itemInfo as Record<string, unknown>) || {};
-        itemId = String(info.itemId ?? itemId);
-        itemTitle = String(info.title ?? info.itemTitle ?? itemTitle);
-        const yuan = parseFloat(String(info.price ?? ''));
-        if (!Number.isNaN(yuan)) amount = Math.round(yuan * 100);
+      const render = String(comp.render ?? '');
+      const compData = (comp.data as Record<string, unknown>) || {};
 
-        const buyerId = String(
-          compData.buyerUserId ?? compData.buyerId ?? '',
+      if (render === 'orderInfoVO' || render === 'itemInfoVO') {
+        const info = (compData.itemInfo as Record<string, unknown>) || compData;
+        itemId = String(info.itemId ?? itemId ?? '');
+        itemTitle = String(info.title ?? info.itemTitle ?? itemTitle ?? '');
+        const yuan = parseFloat(String(info.price ?? compData.price ?? ''));
+        if (!Number.isNaN(yuan) && yuan > 0) amount = Math.round(yuan * 100);
+
+        buyerId = String(
+          compData.buyerUserId ??
+            compData.buyerId ??
+            dig(compData, ['buyer', 'userId']) ??
+            buyerId ??
+            '',
         );
-        const buyerNick = String(
-          compData.buyerNick ?? compData.buyerUserNick ?? '',
+        buyerNick = String(
+          compData.buyerNick ??
+            compData.buyerUserNick ??
+            dig(compData, ['buyer', 'userNick']) ??
+            buyerNick ??
+            '',
         );
-        return {
-          cookie: updatedCookie,
-          itemId: itemId || undefined,
-          itemTitle: itemTitle || undefined,
-          buyerId: buyerId || undefined,
-          buyerNick: buyerNick || undefined,
-          amount,
-        };
+
+        // 数量
+        const qRaw =
+          info.buyAmount ??
+          info.quantity ??
+          compData.buyAmount ??
+          compData.quantity ??
+          dig(compData, ['itemInfo', 'buyAmount']);
+        const q = parseInt(String(qRaw ?? '1'), 10);
+        if (!Number.isNaN(q) && q > 0) quantity = q;
+
+        // 规格：常见字段 skuText / specName+specValue / skuList
+        const skuText = String(
+          info.skuText ??
+            info.skuDesc ??
+            compData.skuText ??
+            dig(compData, ['itemInfo', 'skuText']) ??
+            '',
+        );
+        if (skuText && !specValue) {
+          // 形如 "套餐:月卡" 或 "颜色:红;套餐:月卡"
+          const parts = skuText.split(/[;；,，]/).map((s) => s.trim()).filter(Boolean);
+          if (parts.length === 1 && parts[0].includes(':')) {
+            const [n, ...rest] = parts[0].split(/[:：]/);
+            specName = n.trim();
+            specValue = rest.join(':').trim();
+          } else if (parts.length >= 1) {
+            // 取最后一段作为主规格
+            const last = parts[parts.length - 1];
+            if (last.includes(':') || last.includes('：')) {
+              const [n, ...rest] = last.split(/[:：]/);
+              specName = n.trim();
+              specValue = rest.join(':').trim();
+            } else {
+              specValue = last;
+              specName = '规格';
+            }
+          }
+        }
+        if (!specName) {
+          specName = String(info.specName ?? compData.specName ?? '');
+          specValue = String(info.specValue ?? compData.specValue ?? specValue);
+        }
+
+        xyStatus = String(
+          compData.orderStatus ??
+            compData.status ??
+            dig(compData, ['orderStatus', 'status']) ??
+            xyStatus ??
+            '',
+        );
+      }
+
+      if (render === 'logisticsVO' || render === 'receiverVO' || render === 'addressVO') {
+        receiverName = String(
+          compData.name ?? compData.receiverName ?? dig(compData, ['address', 'name']) ?? receiverName,
+        );
+        receiverPhone = String(
+          compData.phone ?? compData.mobile ?? compData.receiverPhone ?? receiverPhone,
+        );
+        receiverAddress = String(
+          compData.address ??
+            compData.fullAddress ??
+            dig(compData, ['address', 'fullAddress']) ??
+            receiverAddress,
+        );
+      }
+    }
+
+    // 兜底：全树搜索 buyerUserId / buyAmount
+    if (!buyerId || !itemId) {
+      const raw = JSON.stringify(data || {});
+      if (!buyerId) {
+        const m = raw.match(/"buyerUserId"\s*:\s*"?(\d{5,})"?/);
+        if (m) buyerId = m[1];
+      }
+      if (!itemId) {
+        const m = raw.match(/"itemId"\s*:\s*"?(\d{5,})"?/);
+        if (m) itemId = m[1];
+      }
+      if (quantity <= 1) {
+        const m = raw.match(/"buyAmount"\s*:\s*"?(\d+)"?/);
+        if (m) {
+          const q = parseInt(m[1], 10);
+          if (q > 0) quantity = q;
+        }
       }
     }
 
@@ -245,7 +364,16 @@ export class GoofishMtopService {
       cookie: updatedCookie,
       itemId: itemId || undefined,
       itemTitle: itemTitle || undefined,
+      buyerId: buyerId || undefined,
+      buyerNick: buyerNick || undefined,
       amount,
+      quantity,
+      specName: specName || undefined,
+      specValue: specValue || undefined,
+      receiverName: receiverName || undefined,
+      receiverPhone: receiverPhone || undefined,
+      receiverAddress: receiverAddress || undefined,
+      xyStatus: xyStatus || undefined,
     };
   }
 

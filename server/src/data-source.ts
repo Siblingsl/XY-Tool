@@ -17,6 +17,7 @@ import {
   LicenseBatchEntity,
   LicenseCodeEntity,
 } from './modules/license/entities/license.entities';
+import { AiConfigEntity } from './modules/ai/ai-config.entity';
 
 /**
  * TypeORM DataSource 独立实例。
@@ -55,6 +56,7 @@ export const AppDataSource = new DataSource({
     LicenseTypeEntity,
     LicenseBatchEntity,
     LicenseCodeEntity,
+    AiConfigEntity,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   migrationsTableName: 'typeorm_migrations',

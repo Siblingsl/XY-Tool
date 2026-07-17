@@ -70,6 +70,16 @@ export default function Dashboard() {
         duration: 0,
       });
     });
+    const offCaptcha = wsClient.on('account:captcha', (data: any) => {
+      notification.warning({
+        message: '账号触发闲鱼风控',
+        description:
+          data?.message ||
+          `账号 ${data?.accountId} 已进入冷静期，请到「闲鱼账号」查看`,
+        placement: 'bottomRight',
+        duration: 0,
+      });
+    });
     // 每 30s 兜底刷新一次（防止漏推）
     const timer = setInterval(refresh, 30000);
     return () => {
@@ -77,6 +87,7 @@ export default function Dashboard() {
       offCreated();
       offLowStock();
       offExpired();
+      offCaptcha();
       clearInterval(timer);
     };
   }, []);

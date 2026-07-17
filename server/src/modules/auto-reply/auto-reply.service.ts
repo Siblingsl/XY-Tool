@@ -1,26 +1,25 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
 import {
   ReplyKeywordEntity,
   ReplyConfigEntity,
   ReplyHandoffEntity,
 } from './entities/reply.entities';
 import { ChatMessageEvent, ReplyResult } from './types';
-import { RedisService, ChatTurn } from '../redis/redis.service';
 import { ImWebSocketService } from '../../goofish/im-websocket.service';
 import { AccountsService } from '../accounts/accounts.service';
-import { encrypt, decrypt } from '../../common/utils/crypto.util';
+import { RedisService, ChatTurn } from '../redis/redis.service';
+import { encrypt } from '../../common/utils/crypto.util';
+import { globalRiskGuard, sleep, randomInt } from '../../common/utils/risk-control.util';
+import { AiService } from '../ai/ai.service';
 
 /**
- * 自动回复核心引擎。
+ * 自动回复引擎。
  *
- * 处理买家普通聊天消息，按分层优先级匹配并自动回复：
- *   转人工检查 → 关键词精确 → 关键词包含 → AI 回复 → 默认回复 → 静默
- *
- * 设计为无状态（状态全在 Redis），由 im-payment-listener 的 onChatMessage 调用。
+ * 优先级：转人工 > 冷却 > 商品专属关键词 > 通用关键词 > AI议价 > AI普通 > 默认回复
+ * 风控：账号级串行 + 随机延迟 + 冷却
  */
 @Injectable()
 export class AutoReplyService {
@@ -33,18 +32,13 @@ export class AutoReplyService {
     private readonly configRepo: Repository<ReplyConfigEntity>,
     @InjectRepository(ReplyHandoffEntity)
     private readonly handoffRepo: Repository<ReplyHandoffEntity>,
-    private readonly redis: RedisService,
+    private readonly config: ConfigService,
     private readonly imWs: ImWebSocketService,
     private readonly accountsService: AccountsService,
-    private readonly config: ConfigService,
+    private readonly redis: RedisService,
+    private readonly ai: AiService,
   ) {}
 
-  /**
-   * 处理一条买家消息（核心入口）。
-   * @param accountId 闲鱼账号ID
-   * @param tenantId 租户ID
-   * @param cookie 当前账号 cookie（用于发回复）
-   */
   async handle(
     accountId: number,
     tenantId: number,
@@ -52,13 +46,12 @@ export class AutoReplyService {
     cookie: string,
   ): Promise<ReplyResult> {
     try {
-      // 1. 加载账号回复配置（无配置则跳过）
       const cfg = await this.getConfig(accountId, tenantId);
       if (!cfg) {
         return { replied: false, source: 'none' };
       }
 
-      // 2. 转人工检查：命中则标记并停止自动回复
+      // 1. 转人工
       if (this.hitTransferKeyword(msg.content, cfg.transferKeywords)) {
         await this.redis.markHandoff(accountId, msg.buyerId);
         await this.recordHandoff(accountId, tenantId, msg);
@@ -68,12 +61,12 @@ export class AutoReplyService {
         return { replied: false, source: 'handoff', handedOff: true };
       }
 
-      // 3. 已转人工的买家，跳过自动回复
+      // 2. 已转人工
       if (await this.redis.isHandedOff(accountId, msg.buyerId)) {
         return { replied: false, source: 'handoff' };
       }
 
-      // 4. 冷却检查（防刷屏）
+      // 3. 冷却
       const canReply = await this.redis.checkAndSetCooldown(
         accountId,
         msg.buyerId,
@@ -83,16 +76,48 @@ export class AutoReplyService {
         return { replied: false, source: 'cooldown' };
       }
 
-      // 5. 关键词匹配（先精确后包含）
-      const keywordReply = await this.matchKeyword(tenantId, accountId, msg.content);
+      // 4. 关键词（商品专属优先）
+      const keywordReply = await this.matchKeyword(
+        tenantId,
+        accountId,
+        msg.content,
+        msg.itemId,
+      );
       if (keywordReply) {
         await this.sendReply(accountId, cookie, msg, keywordReply);
         return { replied: true, source: 'keyword', content: keywordReply };
       }
 
-      // 6. AI 回复
-      if (cfg.aiEnabled && cfg.aiApiKeyEncrypted) {
-        const aiReply = await this.callAi(accountId, cfg, msg);
+      const aiReady =
+        cfg.aiEnabled &&
+        (await this.ai.isReady(tenantId, {
+          baseUrl: cfg.aiBaseUrl,
+          apiKeyEncrypted: cfg.aiApiKeyEncrypted,
+          model: cfg.aiModel,
+          temperature: cfg.aiTemperature,
+        }));
+
+      // 5. AI 议价（命中议价词且开启）
+      if (
+        aiReady &&
+        cfg.aiBargainEnabled &&
+        this.hitBargainKeyword(msg.content, cfg.bargainKeywords)
+      ) {
+        const bargainReply = await this.callAiBargain(
+          accountId,
+          tenantId,
+          cfg,
+          msg,
+        );
+        if (bargainReply) {
+          await this.sendReply(accountId, cookie, msg, bargainReply);
+          return { replied: true, source: 'ai', content: bargainReply };
+        }
+      }
+
+      // 6. 普通 AI
+      if (aiReady) {
+        const aiReply = await this.callAi(accountId, tenantId, cfg, msg);
         if (aiReply) {
           await this.sendReply(accountId, cookie, msg, aiReply);
           return { replied: true, source: 'ai', content: aiReply };
@@ -102,7 +127,11 @@ export class AutoReplyService {
       // 7. 默认回复
       if (cfg.defaultReplyEnabled && cfg.defaultReplyContent) {
         await this.sendReply(accountId, cookie, msg, cfg.defaultReplyContent);
-        return { replied: true, source: 'default', content: cfg.defaultReplyContent };
+        return {
+          replied: true,
+          source: 'default',
+          content: cfg.defaultReplyContent,
+        };
       }
 
       return { replied: false, source: 'none' };
@@ -114,15 +143,18 @@ export class AutoReplyService {
     }
   }
 
-  // ============ 关键词匹配 ============
-
-  /** 先精确匹配，后包含匹配，命中第一个即返回 */
+  /**
+   * 关键词匹配：
+   * - 先匹配商品专属规则（itemId 相同）
+   * - 再匹配无 itemId 的通用规则
+   * - 精确优先于包含
+   */
   private async matchKeyword(
     tenantId: number,
     accountId: number,
     content: string,
+    itemId?: string,
   ): Promise<string | null> {
-    // 查启用的规则：本账号 + 全局（accountId 为 null）
     const rules = await this.keywordRepo.find({
       where: [
         { tenantId, accountId, enabled: true },
@@ -131,34 +163,93 @@ export class AutoReplyService {
       order: { sortOrder: 'ASC', id: 'ASC' },
     });
 
-    // 精确匹配优先
-    const exact = rules.find(
-      (r) => r.matchType === 'exact' && r.keyword === content.trim(),
-    );
-    if (exact) return exact.replyContent;
+    const text = content.trim();
+    const pick = (list: ReplyKeywordEntity[]): string | null => {
+      const exact = list.find(
+        (r) => r.matchType === 'exact' && r.keyword === text,
+      );
+      if (exact) return exact.replyContent;
+      const contains = list.find(
+        (r) => r.matchType === 'contains' && content.includes(r.keyword),
+      );
+      if (contains) return contains.replyContent;
+      return null;
+    };
 
-    // 包含匹配（按 sortOrder 顺序）
-    const contains = rules.find(
-      (r) => r.matchType === 'contains' && content.includes(r.keyword),
-    );
-    if (contains) return contains.replyContent;
+    if (itemId) {
+      const itemRules = rules.filter((r) => r.itemId && r.itemId === itemId);
+      const hit = pick(itemRules);
+      if (hit) return hit;
+    }
 
-    return null;
+    // 通用：无 itemId 绑定
+    const general = rules.filter((r) => !r.itemId);
+    return pick(general);
   }
 
-  // ============ AI 回复 ============
+  private hitBargainKeyword(content: string, keywords: string): boolean {
+    if (!keywords) return false;
+    const words = keywords
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return words.some((w) => content.includes(w));
+  }
 
-  /** 调 OpenAI 兼容接口，带 Redis 上下文 */
+  private async getBargainCount(
+    accountId: number,
+    buyerId: string,
+  ): Promise<number> {
+    const history = await this.redis.getChatHistory(accountId, buyerId);
+    // 粗略：用户消息中带议价意图的次数
+    return history.filter(
+      (h) =>
+        h.role === 'user' &&
+        /便宜|刀|优惠|少点|砍价|议价|降价|能少|再少/.test(h.content),
+    ).length;
+  }
+
+  private async callAiBargain(
+    accountId: number,
+    tenantId: number,
+    cfg: ReplyConfigEntity,
+    msg: ChatMessageEvent,
+  ): Promise<string | null> {
+    const bargainCount = await this.getBargainCount(accountId, msg.buyerId);
+    if (bargainCount >= (cfg.maxBargainRounds || 3)) {
+      return '亲，已经给到最大优惠啦，实在没法再少了，质量和服务都有保障，考虑下下单吧～';
+    }
+
+    const bargainSystem = `你是一位经验丰富的闲鱼销售，擅长礼貌议价。
+议价策略：
+1. 根据议价次数递减优惠：第1次小幅优惠，第2次中等优惠，第3次接近底线
+2. 接近最大轮数时坚持底线，强调商品价值，不要无限让价
+3. 回复简洁友好，100字以内，不要使用markdown
+
+议价设置：
+- 当前议价次数：${bargainCount + 1}
+- 最大议价轮数：${cfg.maxBargainRounds || 3}
+- 最大优惠百分比：${cfg.maxDiscountPercent || 10}%
+- 最大优惠金额：${cfg.maxDiscountAmount || 100}元
+- 商品ID：${msg.itemId || '未知'}
+
+请结合对话历史给出合适回复。`;
+
+    const patched = {
+      ...cfg,
+      aiSystemPrompt: bargainSystem,
+      aiTemperature: Math.min(cfg.aiTemperature ?? 0.7, 0.8),
+    };
+    return this.callAi(accountId, tenantId, patched, msg);
+  }
+
   private async callAi(
     accountId: number,
+    tenantId: number,
     cfg: ReplyConfigEntity,
     msg: ChatMessageEvent,
   ): Promise<string | null> {
     try {
-      const apiKey = this.decryptApiKey(cfg.aiApiKeyEncrypted);
-      if (!apiKey) return null;
-
-      // 组装上下文：system + 历史 + 当前消息
       const systemPrompt =
         cfg.aiSystemPrompt ||
         '你是一个友善的闲鱼客服助手，负责回答买家关于虚拟商品的咨询。回答要简洁、有礼貌，尽量在 100 字以内。';
@@ -170,29 +261,18 @@ export class AutoReplyService {
         { role: 'user', content: msg.content },
       ];
 
-      const baseUrl = (cfg.aiBaseUrl || '').replace(/\/$/, '');
-      const resp = await axios.post(
-        `${baseUrl}/chat/completions`,
-        {
-          model: cfg.aiModel || 'gpt-4o-mini',
-          messages,
-          temperature: cfg.aiTemperature ?? 0.7,
-          max_tokens: 300,
+      const reply = await this.ai.chatCompletion(tenantId, messages, {
+        temperature: cfg.aiTemperature ?? 0.7,
+        maxTokens: 300,
+        timeoutMs: 30_000,
+        accountFallback: {
+          baseUrl: cfg.aiBaseUrl,
+          apiKeyEncrypted: cfg.aiApiKeyEncrypted,
+          model: cfg.aiModel,
+          temperature: cfg.aiTemperature,
         },
-        {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 30_000,
-        },
-      );
+      });
 
-      const reply: string | undefined =
-        resp.data?.choices?.[0]?.message?.content?.trim();
-      if (!reply) return null;
-
-      // 记录上下文到 Redis（用户消息 + AI 回复）
       await this.redis.pushChat(accountId, msg.buyerId, {
         role: 'user',
         content: msg.content,
@@ -211,40 +291,13 @@ export class AutoReplyService {
     }
   }
 
-  /** 测试 AI 连通性（controller 调用） */
   async testAi(
     baseUrl: string,
     apiKey: string,
     model: string,
   ): Promise<{ ok: boolean; reply?: string; error?: string }> {
-    try {
-      const url = (baseUrl || '').replace(/\/$/, '');
-      const resp = await axios.post(
-        `${url}/chat/completions`,
-        {
-          model: model || 'gpt-4o-mini',
-          messages: [{ role: 'user', content: '你好，请回复"连接成功"' }],
-          max_tokens: 50,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 15_000,
-        },
-      );
-      const reply = resp.data?.choices?.[0]?.message?.content?.trim();
-      return { ok: true, reply };
-    } catch (err) {
-      return {
-        ok: false,
-        error: (err as Error).message,
-      };
-    }
+    return this.ai.testConnection(baseUrl, apiKey, model);
   }
-
-  // ============ 发送回复 ============
 
   private async sendReply(
     accountId: number,
@@ -252,24 +305,26 @@ export class AutoReplyService {
     msg: ChatMessageEvent,
     text: string,
   ): Promise<void> {
-    await this.imWs.sendTextMessage({
-      cookie,
-      accountKey: String(accountId),
-      toUserId: msg.buyerId,
-      text,
-      conversationId: msg.conversationId,
-      onCookieUpdate: async (newCookie) => {
-        await this.accountsService.updateCookieIfChanged(accountId, newCookie);
-      },
+    // 模拟人工打字延迟
+    await sleep(randomInt(500, 1500));
+    await globalRiskGuard.withAccountLock(accountId, async () => {
+      await this.imWs.sendTextMessage({
+        cookie,
+        accountKey: String(accountId),
+        toUserId: msg.buyerId,
+        text,
+        conversationId: msg.conversationId,
+        itemId: msg.itemId,
+        onCookieUpdate: async (newCookie) => {
+          await this.accountsService.updateCookieIfChanged(accountId, newCookie);
+        },
+      });
     });
     this.logger.log(
       `[账号${accountId}] 自动回复买家 ${msg.buyerId}: ${text.slice(0, 40)}`,
     );
   }
 
-  // ============ 转人工 ============
-
-  /** 检查是否命中转人工关键词 */
   private hitTransferKeyword(content: string, transferKeywords: string): boolean {
     if (!transferKeywords) return false;
     const words = transferKeywords
@@ -279,13 +334,11 @@ export class AutoReplyService {
     return words.some((w) => content.includes(w));
   }
 
-  /** 记录转人工到 DB（审计/展示） */
   private async recordHandoff(
     accountId: number,
     tenantId: number,
     msg: ChatMessageEvent,
   ): Promise<void> {
-    // 同一 buyer 已存在记录则更新时间，否则新建
     let record = await this.handoffRepo.findOne({
       where: { tenantId, accountId, buyerId: msg.buyerId },
     });
@@ -308,7 +361,6 @@ export class AutoReplyService {
     }
   }
 
-  /** 重置人工接管（controller 调用） */
   async resetHandoff(
     accountId: number,
     tenantId: number,
@@ -322,9 +374,6 @@ export class AutoReplyService {
     );
   }
 
-  // ============ 配置读写 ============
-
-  /** 获取账号配置，不存在则返回 null（不自动创建） */
   async getConfig(
     accountId: number,
     tenantId: number,
@@ -332,7 +381,6 @@ export class AutoReplyService {
     return this.configRepo.findOne({ where: { accountId, tenantId } });
   }
 
-  /** 获取配置并解密 API Key（controller 返回时脱敏） */
   async getConfigWithMaskedKey(
     accountId: number,
     tenantId: number,
@@ -346,7 +394,6 @@ export class AutoReplyService {
     };
   }
 
-  /** 创建或更新配置（加密 API Key） */
   async upsertConfig(
     accountId: number,
     tenantId: number,
@@ -365,18 +412,21 @@ export class AutoReplyService {
         aiBaseUrl: 'https://api.openai.com/v1',
         aiModel: 'gpt-4o-mini',
         aiTemperature: 0.7,
+        aiBargainEnabled: false,
+        maxDiscountPercent: 10,
+        maxDiscountAmount: 100,
+        maxBargainRounds: 3,
+        bargainKeywords: '便宜,刀,优惠,少点,砍价,议价',
         transferKeywords: '人工,客服',
         cooldownSeconds: 3,
       });
     }
 
-    // 合并非 undefined 字段
     for (const [k, v] of Object.entries(rest)) {
       if (v !== undefined) {
         (cfg as any)[k] = v;
       }
     }
-    // API Key 单独处理（只有显式传入才更新，避免覆盖已有 key）
     if (aiApiKey !== undefined && aiApiKey !== '') {
       cfg.aiApiKeyEncrypted = encrypt(aiApiKey, encKey);
     }
@@ -384,23 +434,126 @@ export class AutoReplyService {
     return this.configRepo.save(cfg);
   }
 
-  private decryptApiKey(encrypted: string | null): string | null {
-    if (!encrypted) return null;
-    try {
-      const encKey = this.config.get<string>('cookieEncryptionKey') || '';
-      return decrypt(encrypted, encKey);
-    } catch {
-      return null;
-    }
-  }
-
-  // ============ 关键词 CRUD（controller 用） ============
-
   async listKeywords(tenantId: number): Promise<ReplyKeywordEntity[]> {
     return this.keywordRepo.find({
       where: { tenantId },
       order: { sortOrder: 'ASC', id: 'DESC' },
     });
+  }
+
+  /** 导出关键词 CSV */
+  async exportKeywordsCsv(tenantId: number): Promise<string> {
+    const list = await this.listKeywords(tenantId);
+    const escape = (v: unknown) => {
+      const s = v == null ? '' : String(v);
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+    const headers = [
+      'keyword',
+      'matchType',
+      'replyContent',
+      'itemId',
+      'accountId',
+      'enabled',
+      'sortOrder',
+    ];
+    const lines = [headers.join(',')];
+    for (const k of list) {
+      lines.push(
+        [
+          k.keyword,
+          k.matchType,
+          k.replyContent,
+          k.itemId ?? '',
+          k.accountId ?? '',
+          k.enabled ? '1' : '0',
+          k.sortOrder ?? 0,
+        ]
+          .map(escape)
+          .join(','),
+      );
+    }
+    return '\uFEFF' + lines.join('\n');
+  }
+
+  /** 从 CSV/文本批量导入关键词（每行: keyword,matchType,replyContent[,itemId]） */
+  async importKeywordsCsv(
+    tenantId: number,
+    text: string,
+    accountId?: number | null,
+  ): Promise<{ imported: number; skipped: number }> {
+    const lines = text
+      .replace(/^\uFEFF/, '')
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    if (lines.length === 0) return { imported: 0, skipped: 0 };
+
+    let start = 0;
+    if (/keyword/i.test(lines[0]) && /reply/i.test(lines[0])) {
+      start = 1;
+    }
+
+    let imported = 0;
+    let skipped = 0;
+    for (let i = start; i < lines.length; i++) {
+      const cols = this.parseCsvLine(lines[i]);
+      const keyword = (cols[0] || '').trim();
+      const matchType = ((cols[1] || 'contains').trim() || 'contains') as string;
+      const replyContent = (cols[2] || '').trim();
+      const itemId = (cols[3] || '').trim() || null;
+      if (!keyword || !replyContent) {
+        skipped++;
+        continue;
+      }
+      if (matchType !== 'exact' && matchType !== 'contains') {
+        skipped++;
+        continue;
+      }
+      await this.createKeyword({
+        tenantId,
+        accountId: accountId ?? null,
+        keyword,
+        matchType,
+        replyContent,
+        itemId,
+        enabled: true,
+        sortOrder: 0,
+      });
+      imported++;
+    }
+    return { imported, skipped };
+  }
+
+  private parseCsvLine(line: string): string[] {
+    const result: string[] = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (line[i + 1] === '"') {
+            cur += '"';
+            i++;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          cur += ch;
+        }
+      } else if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ',') {
+        result.push(cur);
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    result.push(cur);
+    return result;
   }
 
   async createKeyword(
@@ -422,11 +575,7 @@ export class AutoReplyService {
     await this.keywordRepo.delete({ id, tenantId });
   }
 
-  // ============ 人工接管列表（controller 用） ============
-
-  async listHandoffs(
-    tenantId: number,
-  ): Promise<ReplyHandoffEntity[]> {
+  async listHandoffs(tenantId: number): Promise<ReplyHandoffEntity[]> {
     return this.handoffRepo.find({
       where: { tenantId, handedOff: true },
       order: { handedOffAt: 'DESC' },

@@ -16,22 +16,23 @@ import {
   ChatMessageEvent,
 } from '../../goofish/goofish-ws-message.util';
 import { handleAccountAuthError } from '../accounts/account-auth.util';
+import { isGoofishCaptchaChallenge } from '../../goofish/goofish-error.util';
 import { AlertService } from '../alert/alert.service';
 import { AutoReplyService } from '../auto-reply/auto-reply.service';
 
 /**
- * WS 付款消息监听器。
+ * WS 付款消息监听（可选加速）。
  *
- * 参考 xianyu-auto-reply：买家付款后 IM 会推送
- * 「[我已付款，等待你发货]」等系统消息，比轮询更快。
- *
- * 同时监听退款消息（[买家申请退款] / [退款成功...]），
- * 被动感知退款事件并更新订单状态（不主动处置退款）。
+ * 自动发货主路径是订单轮询（sold.get → PENDING → 发货队列）。
+ * WS 需要 login.token；遇 USER_VALIDATE 时长退避，避免每分钟撞风控，
+ * 期间仍靠轮询建单发货。
  */
 @Injectable()
 export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ImPaymentListenerService.name);
   private readonly activeAccountIds = new Set<number>();
+  /** 风控退避：accountId -> 下次允许重连时间戳 */
+  private readonly captchaBackoffUntil = new Map<number, number>();
 
   constructor(
     private readonly config: ConfigService,
@@ -48,11 +49,20 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
     return this.config.get<boolean>('im.paymentListenEnabled', true);
   }
 
+  private get captchaBackoffMs(): number {
+    return this.config.get<number>('im.captchaBackoffMs', 1_800_000);
+  }
+
   async onModuleInit(): Promise<void> {
     if (!this.enabled) {
-      this.logger.log('WS 付款监听未启用（需 SIGN_PROVIDER=goofish）');
+      this.logger.log(
+        'WS 付款监听未启用；自动发货依赖订单轮询（ORDER_POLL_ENABLED）',
+      );
       return;
     }
+    this.logger.log(
+      'WS 付款监听已开启（可选加速）；建单主路径仍是订单轮询',
+    );
     await this.syncListeners();
   }
 
@@ -63,7 +73,7 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
     this.activeAccountIds.clear();
   }
 
-  /** 每分钟同步账号列表：新账号启动监听，禁用账号停止 */
+  /** 每分钟同步；风控账号按退避跳过，不每分钟打 login.token */
   @Cron('0 * * * * *')
   async syncListenersCron(): Promise<void> {
     if (!this.enabled) return;
@@ -91,6 +101,11 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
 
       if (this.activeAccountIds.has(account.id)) continue;
 
+      const backoffUntil = this.captchaBackoffUntil.get(account.id) || 0;
+      if (Date.now() < backoffUntil) {
+        continue;
+      }
+
       try {
         const cookie = this.accountsService.decryptCookie(account);
         await this.imWs.startPaymentListener({
@@ -106,6 +121,9 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
               err,
             );
             this.activeAccountIds.delete(account.id);
+            if (isGoofishCaptchaChallenge(err)) {
+              this.markCaptchaBackoff(account.id);
+            }
           },
           onPaymentMessage: (event) =>
             this.handlePaymentMessage(
@@ -129,17 +147,33 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
             ),
         });
         this.activeAccountIds.add(account.id);
+        this.captchaBackoffUntil.delete(account.id);
       } catch (err) {
         await handleAccountAuthError(
           this.accountsService,
           account.id,
           err,
         );
-        this.logger.error(
-          `账号 ${account.id} 启动 WS 监听失败: ${(err as Error).message}`,
-        );
+        const msg = (err as Error).message;
+        if (isGoofishCaptchaChallenge(err)) {
+          this.markCaptchaBackoff(account.id);
+          const mins = Math.ceil(this.captchaBackoffMs / 60_000);
+          this.logger.warn(
+            `账号 ${account.id} WS 暂不可用（login.token 风控），${mins} 分钟内不再重连；` +
+              `自动发货继续走订单轮询。${msg}`,
+          );
+        } else {
+          this.logger.error(
+            `账号 ${account.id} 启动 WS 监听失败: ${msg}`,
+          );
+        }
       }
     }
+  }
+
+  private markCaptchaBackoff(accountId: number): void {
+    const until = Date.now() + this.captchaBackoffMs;
+    this.captchaBackoffUntil.set(accountId, until);
   }
 
   private async handlePaymentMessage(
@@ -150,6 +184,12 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     let itemTitle = event.itemId || '闲鱼商品';
     let amount: number | undefined;
+    let quantity = 1;
+    let specName: string | undefined;
+    let specValue: string | undefined;
+    let receiverName: string | undefined;
+    let receiverPhone: string | undefined;
+    let receiverAddress: string | undefined;
     let workingCookie = cookie;
 
     try {
@@ -164,6 +204,12 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
       if (detail.itemId) event.itemId = detail.itemId;
       if (detail.buyerId) event.buyerId = detail.buyerId;
       if (detail.buyerNick) event.buyerNick = detail.buyerNick;
+      if (detail.quantity && detail.quantity > 0) quantity = detail.quantity;
+      if (detail.specName) specName = detail.specName;
+      if (detail.specValue) specValue = detail.specValue;
+      if (detail.receiverName) receiverName = detail.receiverName;
+      if (detail.receiverPhone) receiverPhone = detail.receiverPhone;
+      if (detail.receiverAddress) receiverAddress = detail.receiverAddress;
     } catch (e) {
       this.logger.warn(
         `订单 ${event.bizOrderId} 详情拉取失败: ${(e as Error).message}`,
@@ -180,11 +226,19 @@ export class ImPaymentListenerService implements OnModuleInit, OnModuleDestroy {
       buyerId: event.buyerId,
       conversationId: event.conversationId || undefined,
       amount,
+      quantity,
+      specName,
+      specValue,
+      receiverName,
+      receiverPhone,
+      receiverAddress,
       orderCreatedAt: new Date(),
     });
 
     if (created) {
-      this.logger.log(`WS 付款建单: ${event.bizOrderId} (${itemTitle})`);
+      this.logger.log(
+        `WS 付款建单: ${event.bizOrderId} (${itemTitle}) qty=${quantity} buyer=${event.buyerId || 'pending'}`,
+      );
     }
   }
 

@@ -1,22 +1,8 @@
 import { useEffect, useState } from 'react';
-import {
-  message,
-  Button,
-  Card,
-  Form,
-  Input,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Switch,
-  Table,
-  Tabs,
-  Tag,
-  Typography,
-} from 'antd';
-import { PlusOutlined, ReloadOutlined, ExperimentOutlined } from '@ant-design/icons';
+import { Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography, message, Upload } from 'antd';
+import { PlusOutlined, ReloadOutlined, ExperimentOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import api from '../api';
+import { apiPath } from '../api/config';
 
 /**
  * 自动回复配置页。
@@ -90,6 +76,7 @@ function KeywordsTab() {
     setEditId(row.id);
     form.setFieldsValue({
       keyword: row.keyword,
+      itemId: row.itemId || undefined,
       matchType: row.matchType,
       replyContent: row.replyContent,
       enabled: row.enabled,
@@ -128,6 +115,7 @@ function KeywordsTab() {
         v ? <Tag color="blue">指定账号</Tag> : <Tag color="purple">全局</Tag>,
     },
     { title: '关键词', dataIndex: 'keyword' },
+      { title: '商品ID', dataIndex: 'itemId', width: 120, render: (v: string) => v || '通用' },
     {
       title: '匹配',
       dataIndex: 'matchType',
@@ -164,11 +152,54 @@ function KeywordsTab() {
     },
   ];
 
+  const handleExport = async () => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      const resp = await fetch(apiPath('/auto-reply/keywords/export'), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!resp.ok) throw new Error('导出失败');
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `keywords_${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      message.success('已导出关键词 CSV');
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
+  const handleImportFile = async (file: File) => {
+    try {
+      const text = await file.text();
+      const res: any = await api.post('/auto-reply/keywords/import', { text });
+      message.success(`导入成功 ${res.imported} 条，跳过 ${res.skipped} 条`);
+      refresh();
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+    return false;
+  };
+
   return (
     <Card
       extra={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={refresh}>刷新</Button>
+          <Button icon={<DownloadOutlined />} onClick={handleExport}>导出</Button>
+          <Upload
+            accept=".csv,.txt"
+            showUploadList={false}
+            beforeUpload={(file) => {
+              void handleImportFile(file);
+              return false;
+            }}
+          >
+            <Button icon={<UploadOutlined />}>导入CSV</Button>
+          </Upload>
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -195,6 +226,9 @@ function KeywordsTab() {
         <Form form={form} layout="vertical">
           <Form.Item name="accountId" label="适用账号（留空=全局生效）">
             <Input placeholder="账号ID（可选）" type="number" />
+          </Form.Item>
+          <Form.Item name="itemId" label="商品ID（可选，商品专属回复）" extra="填写后仅该商品会话命中；留空为通用规则">
+            <Input placeholder="闲鱼商品ID，留空=通用" />
           </Form.Item>
           <Form.Item name="keyword" label="关键词" rules={[{ required: true }]}>
             <Input placeholder="如：怎么用 / 发货" />
@@ -272,6 +306,11 @@ function ConfigTabImpl() {
         aiTemperature: res.aiTemperature ?? 0.7,
         transferKeywords: res.transferKeywords || '人工,客服',
         cooldownSeconds: res.cooldownSeconds ?? 3,
+        aiBargainEnabled: !!res.aiBargainEnabled,
+        maxDiscountPercent: res.maxDiscountPercent ?? 10,
+        maxDiscountAmount: res.maxDiscountAmount ?? 100,
+        maxBargainRounds: res.maxBargainRounds ?? 3,
+        bargainKeywords: res.bargainKeywords || '便宜,刀,优惠,少点,砍价,议价',
       });
     } catch (e) {
       message.error((e as Error).message);
@@ -340,20 +379,12 @@ function ConfigTabImpl() {
         </Form.Item>
 
         <Typography.Title level={5} style={{ marginTop: 16 }}>AI 智能回复</Typography.Title>
+        <Typography.Paragraph type="secondary" style={{ marginTop: -8 }}>
+          接口凭据在「AI 接入」统一配置；此处仅控制本账号是否启用及角色设定。
+          未配公共 AI 时，仍可填写下方账号级 Key 作为回退。
+        </Typography.Paragraph>
         <Form.Item name="aiEnabled" label="启用 AI 回复" valuePropName="checked">
           <Switch />
-        </Form.Item>
-        <Form.Item name="aiBaseUrl" label="OpenAI 兼容地址">
-          <Input placeholder="https://api.openai.com/v1" />
-        </Form.Item>
-        <Form.Item
-          name="aiApiKey"
-          label={`API Key${cfg?.aiApiKeyConfigured ? '（已配置，留空保留原值）' : ''}`}
-        >
-          <Input.Password placeholder="sk-..." />
-        </Form.Item>
-        <Form.Item name="aiModel" label="模型名">
-          <Input placeholder="gpt-4o-mini" />
         </Form.Item>
         <Form.Item name="aiSystemPrompt" label="系统提示词（角色设定）">
           <Input.TextArea rows={3} placeholder="你是一个友善的闲鱼客服..." />
@@ -361,11 +392,48 @@ function ConfigTabImpl() {
         <Form.Item name="aiTemperature" label="温度（0-2，越大越随机）">
           <Input type="number" step="0.1" />
         </Form.Item>
+        <Typography.Title level={5} style={{ marginTop: 8 }}>账号级 AI 回退（可选）</Typography.Title>
+        <Form.Item name="aiBaseUrl" label="OpenAI 兼容地址">
+          <Input placeholder="公共 AI 未配置时才使用" />
+        </Form.Item>
+        <Form.Item
+          name="aiApiKey"
+          label={`API Key${cfg?.aiApiKeyConfigured ? '（已配置，留空保留原值）' : ''}`}
+        >
+          <Input.Password placeholder="可选回退 Key" />
+        </Form.Item>
+        <Form.Item name="aiModel" label="模型名">
+          <Input placeholder="gpt-4o-mini" />
+        </Form.Item>
         <Button icon={<ExperimentOutlined />} loading={testing} onClick={handleTestAi} style={{ marginBottom: 16 }}>
-          测试 AI 连通
+          测试账号级 AI
         </Button>
 
         <Typography.Title level={5} style={{ marginTop: 16 }}>转人工 / 冷却</Typography.Title>
+        
+        <Form.Item name="aiBargainEnabled" label="AI 智能议价" valuePropName="checked" extra="命中议价关键词时走议价策略（需同时开启 AI 回复）">
+          <Switch checkedChildren="开" unCheckedChildren="关" />
+        </Form.Item>
+        <Form.Item noStyle shouldUpdate={(p, c) => p.aiBargainEnabled !== c.aiBargainEnabled}>
+          {({ getFieldValue }) =>
+            getFieldValue('aiBargainEnabled') ? (
+              <>
+                <Form.Item name="maxDiscountPercent" label="最大优惠百分比">
+                  <InputNumber min={0} max={90} style={{ width: '100%' }} addonAfter="%" />
+                </Form.Item>
+                <Form.Item name="maxDiscountAmount" label="最大优惠金额（元）">
+                  <InputNumber min={0} max={10000} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name="maxBargainRounds" label="最大议价轮数">
+                  <InputNumber min={1} max={10} style={{ width: '100%' }} />
+                </Form.Item>
+                <Form.Item name="bargainKeywords" label="议价关键词" extra="逗号分隔">
+                  <Input placeholder="便宜,刀,优惠,少点,砍价,议价" />
+                </Form.Item>
+              </>
+            ) : null
+          }
+        </Form.Item>
         <Form.Item name="transferKeywords" label="转人工关键词（逗号分隔）">
           <Input placeholder="人工,客服,转人工" />
         </Form.Item>

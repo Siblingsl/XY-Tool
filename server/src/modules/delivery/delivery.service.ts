@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+﻿import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { ConfigService } from '@nestjs/config';
@@ -19,6 +19,7 @@ import { RealtimeService } from '../realtime/realtime.service';
 import { AlertService } from '../alert/alert.service';
 import { LicenseService } from '../license/license.service';
 import { DeliveryJobData } from './delivery.processor';
+import { globalRiskGuard } from '../../common/utils/risk-control.util';
 
 /**
  * 发货执行引擎。
@@ -27,6 +28,8 @@ import { DeliveryJobData } from './delivery.processor';
  * - 无 buyerId 不发货、不消耗卡密
  * - IM 发送成功后立即写 success 日志，重试时不再重复发送
  * - recoverStuckOrders 恢复卡在 DELIVERING 的订单
+ * - 账号级风控：最小间隔 + 抖动 + 滑动窗口 + 发货冷却
+ * - 支持延时发货 / 多数量 / 多规格匹配
  */
 @Injectable()
 export class DeliveryService {
@@ -52,33 +55,40 @@ export class DeliveryService {
     private readonly licenseService: LicenseService,
   ) {}
 
-  async processOrder(order: OrderEntity): Promise<{
+  async processOrder(
+    order: OrderEntity,
+    options: { forceResend?: boolean } = {},
+  ): Promise<{
     success: boolean;
     message: string;
   }> {
     const start = Date.now();
 
-    if (order.status === 'DELIVERED') {
+    if (order.status === 'DELIVERED' && !options.forceResend) {
       return { success: true, message: '订单已发货' };
     }
 
+    // 退款中/已退款不再发货
+    if (order.status === 'REFUNDING' || order.status === 'REFUNDED') {
+      return { success: false, message: `订单状态 ${order.status}，跳过发货` };
+    }
+
     const priorSuccess = await this.findSuccessLog(order.id);
-    if (priorSuccess) {
+    if (priorSuccess && !options.forceResend) {
       await this.finalizeSuccessfulDelivery(order, priorSuccess);
       return { success: true, message: '订单已发货（幂等恢复）' };
     }
 
-    const product = await this.productsService.findByItemId(
-      order.tenantId,
-      order.itemId,
-      order.accountId,
-    );
-    if (!product || !product.enabled) {
-      await this.ordersService.markIgnored(
+    // 订单级冷却（防重复触发；手动强制补发跳过）
+    if (!options.forceResend && !globalRiskGuard.canDeliverOrder(order.bizOrderId)) {
+      const cooldownUntil = new Date(Date.now() + 60_000);
+      await this.ordersService.deferUntil(
         order.id,
-        '无匹配的发货规则或规则已禁用',
+        cooldownUntil,
+        '订单在发货冷却期，稍后自动重试',
       );
-      return { success: false, message: '无匹配发货规则' };
+      this.logger.warn(`订单 ${order.bizOrderId} 在发货冷却期，已延后`);
+      return { success: false, message: '订单在发货冷却期' };
     }
 
     const account = await this.accountsService
@@ -86,13 +96,7 @@ export class DeliveryService {
       .then((list) => list.find((a) => a.id === order.accountId));
 
     if (!account) {
-      await this.failWithLog(
-        order,
-        product,
-        null,
-        '关联的闲鱼账号不存在或已禁用',
-        start,
-      );
+      await this.ordersService.markFailed(order.id, '关联的闲鱼账号不存在或已禁用');
       return { success: false, message: '闲鱼账号不可用' };
     }
 
@@ -100,11 +104,31 @@ export class DeliveryService {
     const useGoofish =
       this.config.get<string>('sign.provider') === 'goofish';
 
+    // 补全 buyerId / 数量 / 规格 / 会话（goofish 模式尽量拉详情）
     let buyerId = order.buyerId;
     let buyerNick = order.buyerNick;
+    let quantity = Math.max(1, order.quantity || 1);
+    let matchedProduct = await this.productsService.findMatchingRule(
+      order.tenantId,
+      order.itemId,
+      order.accountId,
+      order.specName,
+      order.specValue,
+    );
 
-    if (!buyerId && useGoofish) {
+    const needDetail =
+      useGoofish &&
+      (!buyerId ||
+        !order.conversationId ||
+        !order.specName ||
+        !order.specValue ||
+        quantity <= 1 ||
+        !order.itemId ||
+        order.itemId === 'unknown');
+
+    if (needDetail) {
       try {
+        await globalRiskGuard.waitTurn(account.id);
         const detail = await this.goofishMtop.fetchOrderDetail(
           cookie,
           order.bizOrderId,
@@ -119,35 +143,127 @@ export class DeliveryService {
         if (detail.buyerId) {
           buyerId = detail.buyerId;
           buyerNick = detail.buyerNick ?? buyerNick;
-          await this.ordersService.patchBuyerInfo(
-            order.id,
-            buyerId,
-            buyerNick ?? undefined,
-          );
         }
+        const patch: Partial<OrderEntity> = {};
+        if (detail.buyerId) {
+          patch.buyerId = detail.buyerId;
+          patch.buyerNick = detail.buyerNick ?? buyerNick ?? null;
+        }
+        if (detail.itemId && (!order.itemId || order.itemId === 'unknown')) {
+          patch.itemId = detail.itemId;
+          order.itemId = detail.itemId;
+        }
+        if (detail.itemTitle) {
+          patch.itemTitle = detail.itemTitle;
+        }
+        if (detail.quantity && detail.quantity > 0) {
+          quantity = detail.quantity;
+          patch.quantity = detail.quantity;
+        }
+        if (detail.specName) {
+          patch.specName = detail.specName;
+          order.specName = detail.specName;
+        }
+        if (detail.specValue) {
+          patch.specValue = detail.specValue;
+          order.specValue = detail.specValue;
+        }
+        if (detail.receiverName) patch.receiverName = detail.receiverName;
+        if (detail.receiverPhone) patch.receiverPhone = detail.receiverPhone;
+        if (detail.receiverAddress) patch.receiverAddress = detail.receiverAddress;
+        if (Object.keys(patch).length > 0) {
+          await this.ordersService.patchOrderFields(order.id, patch);
+          if (patch.buyerId) {
+            buyerId = patch.buyerId;
+          }
+        }
+
+        // 补全规格/商品后重新匹配规则
+        matchedProduct = await this.productsService.findMatchingRule(
+          order.tenantId,
+          order.itemId,
+          order.accountId,
+          order.specName,
+          order.specValue,
+        );
       } catch (e) {
         this.logger.warn(
-          `订单 ${order.bizOrderId} 拉取详情补 buyerId 失败: ${(e as Error).message}`,
+          `订单 ${order.bizOrderId} 拉取详情补全失败: ${(e as Error).message}`,
         );
       }
+    }
+
+    const product = matchedProduct;
+    if (!product || !product.enabled) {
+      await this.ordersService.markIgnored(
+        order.id,
+        '无匹配的发货规则或规则已禁用',
+      );
+      return { success: false, message: '无匹配发货规则' };
     }
 
     if (!buyerId) {
       await this.failWithLog(
         order,
         product,
-        null,
+        [],
         '缺少买家 ID，无法发送 IM 消息',
         start,
       );
       return { success: false, message: '缺少买家 ID' };
     }
 
-    const { content, kamiItemId, failReason } = await this.prepareContent(product, order);
-    if (!content) {
-      const reason = failReason || '准备发货内容失败';
-      await this.ordersService.markFailed(order.id, reason);
-      return { success: false, message: reason };
+    // 延时发货：不阻塞 worker，用 nextRetryAt 延后调度（带小抖动）
+    if (product.delaySeconds > 0 && !options.forceResend) {
+      const baseTime = order.orderCreatedAt || order.createdAt || new Date();
+      const readyAtMs =
+        new Date(baseTime).getTime() + product.delaySeconds * 1000;
+      const jitterMs = Math.round(product.delaySeconds * 100 * Math.random());
+      if (Date.now() < readyAtMs + jitterMs) {
+        const readyAt = new Date(readyAtMs + jitterMs);
+        await this.ordersService.deferUntil(
+          order.id,
+          readyAt,
+          `延时发货等待中（${product.delaySeconds}s）`,
+        );
+        this.logger.log(
+          `订单 ${order.bizOrderId} 延时发货，将于 ${readyAt.toISOString()} 后再处理`,
+        );
+        return { success: false, message: '延时发货等待中' };
+      }
+    }
+    // 短思考延迟，避免“秒回秒发”触发风控
+    await globalRiskGuard.humanDeliveryDelay(600, 1800);
+
+    // 多数量：仅 kami/license 有意义；link/text 仍发 1 次
+    const sendCount =
+      product.multiQuantity &&
+      (product.deliveryType === 'kami' || product.deliveryType === 'license')
+        ? Math.min(Math.max(1, quantity), 20) // 硬上限 20，防误配炸库存
+        : 1;
+
+    const preparedList: Array<{
+      content: string;
+      kamiItemId: number | null;
+    }> = [];
+
+    for (let i = 0; i < sendCount; i++) {
+      const prepared = await this.prepareContent(product, order, i, sendCount);
+      if (!prepared.content) {
+        // 释放已锁定卡密
+        for (const p of preparedList) {
+          if (p.kamiItemId) {
+            await this.kamiPoolService.releaseItem(p.kamiItemId);
+          }
+        }
+        const reason = prepared.failReason || '准备发货内容失败';
+        await this.ordersService.markFailed(order.id, reason);
+        return { success: false, message: reason };
+      }
+      preparedList.push({
+        content: prepared.content,
+        kamiItemId: prepared.kamiItemId,
+      });
     }
 
     await this.ordersService.markAssigned(order.id, product.id);
@@ -164,48 +280,69 @@ export class DeliveryService {
     };
 
     let imSent = false;
+    const kamiIds = preparedList
+      .map((p) => p.kamiItemId)
+      .filter((id): id is number => id != null);
 
     try {
-      await this.messageApi.sendTextMessage(
-        ctx,
-        buyerId,
-        order.bizOrderId,
-        content,
-        {
-          conversationId: order.conversationId,
-          itemId: order.itemId,
-          accountKey: String(account.id),
-          onCookieUpdate: async (newCookie) => {
-            await this.accountsService.updateCookieIfChanged(
-              account.id,
-              newCookie,
-            );
-          },
-        },
-      );
-      imSent = true;
+      // 账号级风控锁：串行 + 间隔 + 滑动窗口
+      await globalRiskGuard.withAccountLock(account.id, async () => {
+        for (let i = 0; i < preparedList.length; i++) {
+          const item = preparedList[i];
+          await this.messageApi.sendTextMessage(
+            ctx,
+            buyerId!,
+            order.bizOrderId,
+            item.content,
+            {
+              conversationId: order.conversationId,
+              itemId: order.itemId,
+              accountKey: String(account.id),
+              onCookieUpdate: async (newCookie) => {
+                await this.accountsService.updateCookieIfChanged(
+                  account.id,
+                  newCookie,
+                );
+                ctx.cookie = newCookie;
+              },
+            },
+          );
+          imSent = true;
+          if (i < preparedList.length - 1) {
+            await globalRiskGuard.multiItemGap();
+          }
+        }
+      });
 
       // IM 发送成功后立即写日志，防止崩溃后重复发卡
+      const combined = preparedList.map((p) => p.content).join('\n---\n');
       await this.writeLog(
         order,
         product,
-        kamiItemId,
-        content,
+        kamiIds[0] ?? null,
+        combined,
         'success',
         null,
         start,
       );
 
-      if (
+      globalRiskGuard.markDelivered(order.bizOrderId);
+
+      // 确认发货：全局开关 或 账号级 autoConfirm（参考 super-butler）
+      const shouldConfirm =
         useGoofish &&
-        this.config.get<boolean>('delivery.confirmEnabled', false)
-      ) {
+        (this.config.get<boolean>('delivery.confirmEnabled', false) ||
+          !!account.autoConfirm);
+      if (shouldConfirm) {
         try {
+          // 确认发货与 IM 间隔，降低风控
+          await globalRiskGuard.waitTurn(account.id);
+          await globalRiskGuard.humanDeliveryDelay(400, 1200);
           const confirm = await this.goofishMtop.confirmVirtualShip(
-            cookie,
+            ctx.cookie,
             order.bizOrderId,
           );
-          if (confirm.cookie !== cookie) {
+          if (confirm.cookie !== ctx.cookie) {
             await this.accountsService.updateCookieIfChanged(
               account.id,
               confirm.cookie,
@@ -219,12 +356,16 @@ export class DeliveryService {
         }
       }
 
-      if (kamiItemId) {
-        await this.kamiPoolService.confirmItem(kamiItemId);
+      for (const id of kamiIds) {
+        await this.kamiPoolService.confirmItem(id);
       }
       await this.ordersService.markDelivered(order.id);
 
-      return { success: true, message: '发货成功' };
+      return {
+        success: true,
+        message:
+          sendCount > 1 ? `发货成功（共 ${sendCount} 份）` : '发货成功',
+      };
     } catch (err) {
       const errorMsg = (err as Error).message || '未知错误';
       await handleAccountAuthError(
@@ -233,15 +374,99 @@ export class DeliveryService {
         err,
       );
       if (imSent) {
-        // IM 已发送 + success 日志已写入 → 不释放卡密，由 recoverStuckOrders 兜底完成
+        // IM 已发送 + success 日志可能已写 → 不释放卡密
         this.logger.warn(
           `订单 ${order.bizOrderId} IM 已发送但后续流程异常: ${errorMsg}`,
         );
+        // 若 success 日志尚未写（中途异常），补写
+        const ok = await this.findSuccessLog(order.id);
+        if (!ok) {
+          await this.writeLog(
+            order,
+            product,
+            kamiIds[0] ?? null,
+            preparedList.map((p) => p.content).join('\n---\n'),
+            'success',
+            `IM已发送但后续异常: ${errorMsg}`,
+            start,
+          );
+        }
+        for (const id of kamiIds) {
+          await this.kamiPoolService.confirmItem(id);
+        }
+        await this.ordersService.markDelivered(order.id);
+        globalRiskGuard.markDelivered(order.bizOrderId);
       } else {
-        await this.failWithLog(order, product, kamiItemId, errorMsg, start);
+        await this.failWithLog(order, product, kamiIds, errorMsg, start);
       }
       return { success: false, message: errorMsg };
     }
+  }
+
+  /**
+   * 手动完整发货（匹配规则 + 发卡密 + IM）。
+   * mode=status_only 时只确认闲鱼发货状态，不消耗卡密。
+   */
+  async manualShip(
+    orderId: number,
+    tenantId: number,
+    mode: 'full' | 'status_only' = 'full',
+  ): Promise<{ success: boolean; message: string }> {
+    const order = await this.ordersService.findByIdForTenant(orderId, tenantId);
+    if (!order) {
+      return { success: false, message: '订单不存在' };
+    }
+
+    if (mode === 'status_only') {
+      const account = await this.accountsService
+        .listEnabled(tenantId)
+        .then((list) => list.find((a) => a.id === order.accountId));
+      if (!account) {
+        return { success: false, message: '账号不可用' };
+      }
+      if (this.config.get<string>('sign.provider') !== 'goofish') {
+        return { success: false, message: '仅 goofish 模式支持确认发货' };
+      }
+      try {
+        const cookie = this.accountsService.decryptCookie(account);
+        await globalRiskGuard.withAccountLock(account.id, async () => {
+          const confirm = await this.goofishMtop.confirmVirtualShip(
+            cookie,
+            order.bizOrderId,
+          );
+          if (confirm.cookie !== cookie) {
+            await this.accountsService.updateCookieIfChanged(
+              account.id,
+              confirm.cookie,
+            );
+          }
+        });
+        if (order.status !== 'DELIVERED') {
+          await this.ordersService.markDelivered(order.id);
+        }
+        return { success: true, message: '已仅修改闲鱼发货状态' };
+      } catch (e) {
+        return { success: false, message: (e as Error).message };
+      }
+    }
+
+    // full: 重置后发货；已发货订单允许强制补发（会再次消耗卡密）
+    if (order.status === 'DELIVERING') {
+      return { success: false, message: '订单正在发货中，请稍后再试' };
+    }
+
+    const forceResend = order.status === 'DELIVERED';
+    if (['FAILED', 'IGNORED', 'PENDING'].includes(order.status)) {
+      await this.ordersService.retryOrder(orderId, tenantId);
+    } else if (forceResend) {
+      await this.ordersService.forceResetForManualShip(orderId);
+    }
+
+    const reloaded = await this.ordersService.findByIdForTenant(orderId, tenantId);
+    if (!reloaded) return { success: false, message: '订单不存在' };
+
+    // 手动发货同步执行，避免队列 jobId 去重挡住补发
+    return this.processOrder(reloaded, { forceResend });
   }
 
   /** 手动重试发货：入队走队列，保持账号串行 */
@@ -249,22 +474,31 @@ export class DeliveryService {
     orderId: number,
     tenantId: number,
   ): Promise<{ success: boolean; message: string }> {
-    // 先重置订单状态
     await this.ordersService.retryOrder(orderId, tenantId);
 
-    const jobId = `delivery:${orderId}`;
-    // 如果队列中已有同订单任务，不重复入队
-    const existing = await this.deliveryQueue.getJob(jobId);
+    const jobId = `delivery:${orderId}:${Date.now()}`;
+    // 清理旧 job 去重键，允许手动重试
+    const existing = await this.deliveryQueue.getJob(`delivery:${orderId}`);
     if (existing) {
       const state = await existing.getState();
       if (state === 'waiting' || state === 'active' || state === 'delayed') {
         return { success: true, message: '任务已在队列中' };
       }
+      try {
+        await existing.remove();
+      } catch {
+        /* ignore */
+      }
     }
 
     await this.deliveryQueue.add(
       { orderId, tenantId },
-      { jobId, attempts: 1, removeOnComplete: 100, removeOnFail: 50 },
+      {
+        jobId: `delivery:${orderId}`,
+        attempts: 1,
+        removeOnComplete: true,
+        removeOnFail: true,
+      },
     );
     return { success: true, message: '已重新入队' };
   }
@@ -325,7 +559,12 @@ export class DeliveryService {
   private async prepareContent(
     product: ProductEntity,
     order: OrderEntity,
+    index = 0,
+    total = 1,
   ): Promise<{ content: string | null; kamiItemId: number | null; failReason?: string }> {
+    const remarkSuffix =
+      product.remark && index === total - 1 ? `\n---\n${product.remark}` : '';
+
     switch (product.deliveryType as DeliveryType) {
       case 'kami': {
         if (!product.kamiPoolId) {
@@ -337,13 +576,20 @@ export class DeliveryService {
           order.tenantId,
         );
         if (!kamiItem) {
-          return { content: null, kamiItemId: null, failReason: '卡密池库存不足' };
+          return {
+            content: null,
+            kamiItemId: null,
+            failReason:
+              total > 1
+                ? `卡密池库存不足（需要 ${total} 份，第 ${index + 1} 份失败）`
+                : '卡密池库存不足',
+          };
         }
-        const text = [
-          kamiItem.content,
-          ...(product.remark ? [`\n---\n${product.remark}`] : []),
-        ].join('');
-        return { content: text, kamiItemId: kamiItem.id };
+        const prefix = total > 1 ? `【${index + 1}/${total}】\n` : '';
+        return {
+          content: `${prefix}${kamiItem.content}${remarkSuffix}`,
+          kamiItemId: kamiItem.id,
+        };
       }
 
       case 'link':
@@ -351,11 +597,10 @@ export class DeliveryService {
         if (!product.fixedContent?.trim()) {
           return { content: null, kamiItemId: null, failReason: '未配置固定发货内容' };
         }
-        const text = [
-          product.fixedContent,
-          ...(product.remark ? [`\n---\n${product.remark}`] : []),
-        ].join('');
-        return { content: text, kamiItemId: null };
+        return {
+          content: `${product.fixedContent}${remarkSuffix}`,
+          kamiItemId: null,
+        };
       }
 
       case 'license': {
@@ -374,12 +619,15 @@ export class DeliveryService {
             failReason: `激活码分配失败（类型 ${product.licenseTypeCode} 不存在、已禁用或不可用）`,
           };
         }
-        const text = [
+        const prefix = total > 1 ? `【${index + 1}/${total}】\n` : '';
+        const body = [
           licenseCode,
           ...(product.fixedContent ? [`\n---\n${product.fixedContent}`] : []),
-          ...(product.remark ? [`\n---\n${product.remark}`] : []),
         ].join('');
-        return { content: text, kamiItemId: null };
+        return {
+          content: `${prefix}${body}${remarkSuffix}`,
+          kamiItemId: null,
+        };
       }
 
       default:
@@ -390,29 +638,33 @@ export class DeliveryService {
   private async failWithLog(
     order: OrderEntity,
     product: ProductEntity,
-    kamiItemId: number | null,
+    kamiItemIds: number[],
     errorMsg: string,
     startTime: number,
   ): Promise<void> {
-    if (kamiItemId) {
-      await this.kamiPoolService.releaseItem(kamiItemId);
+    for (const id of kamiItemIds) {
+      await this.kamiPoolService.releaseItem(id);
     }
 
-    if (order.retryCount < this.MAX_RETRIES) {
-      const delayMs = Math.pow(2, order.retryCount) * 10000;
+    // 最多 MAX_RETRIES 次尝试：当前为第 (retryCount+1) 次，失败后若已达上限则终态
+    const attemptNo = order.retryCount + 1;
+    if (attemptNo < this.MAX_RETRIES) {
+      // 指数退避 + 抖动，避免整点齐发
+      const base = Math.pow(2, order.retryCount) * 10000;
+      const delayMs = Math.round(base * (0.8 + Math.random() * 0.4));
       const nextRetryAt = new Date(Date.now() + delayMs);
       await this.ordersService.incrementRetry(order.id, nextRetryAt);
       await this.writeLog(
         order,
         product,
-        kamiItemId,
+        kamiItemIds[0] ?? null,
         null,
         'failed',
         errorMsg,
         startTime,
       );
       this.logger.warn(
-        `订单 ${order.bizOrderId} 发货失败，${delayMs / 1000}s 后重试 (${order.retryCount + 1}/${this.MAX_RETRIES}): ${errorMsg}`,
+        `订单 ${order.bizOrderId} 发货失败，${Math.round(delayMs / 1000)}s 后重试 (${attemptNo}/${this.MAX_RETRIES}): ${errorMsg}`,
       );
     } else {
       const failReason = `重试 ${this.MAX_RETRIES} 次仍失败: ${errorMsg}`;
@@ -420,7 +672,7 @@ export class DeliveryService {
       await this.writeLog(
         order,
         product,
-        kamiItemId,
+        kamiItemIds[0] ?? null,
         null,
         'failed',
         errorMsg,
@@ -428,7 +680,6 @@ export class DeliveryService {
       );
       this.logger.error(`订单 ${order.bizOrderId} 最终失败: ${errorMsg}`);
 
-      // 告警：最终失败
       if (this.config.get<boolean>('alert.onFinalFailure', true)) {
         this.alertService.send({
           title: '发货最终失败',
@@ -467,7 +718,6 @@ export class DeliveryService {
     });
     await this.logRepo.save(log);
 
-    // 实时推送发货结果到前端
     this.realtime.pushDeliveryResult(order.tenantId, {
       orderId: order.id,
       result,

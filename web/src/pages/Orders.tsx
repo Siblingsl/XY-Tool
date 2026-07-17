@@ -1,18 +1,29 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type Key } from 'react';
 import {
   Button,
   Card,
+  Drawer,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
   Table,
   Tabs,
   Tag,
   Typography,
   message,
-  Space,
-  Popconfirm,
 } from 'antd';
-import { ReloadOutlined, RedoOutlined } from '@ant-design/icons';
+import {
+  RedoOutlined,
+  ReloadOutlined,
+  SendOutlined,
+  SyncOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
+} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api from '../api';
+import { apiPath } from '../api/config';
 import { wsClient } from '../api/ws';
 
 export default function Orders() {
@@ -20,18 +31,27 @@ export default function Orders() {
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [tabKey, setTabKey] = useState('orders');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
+  const [detail, setDetail] = useState<any | null>(null);
+  const [shipOpen, setShipOpen] = useState(false);
+  const [shipOrderId, setShipOrderId] = useState<number | null>(null);
+  const [shipMode, setShipMode] = useState<'full' | 'status_only'>('full');
+  const [shipping, setShipping] = useState(false);
 
   const refreshOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const res: any = await api.get('/orders', { params: { size: 50 } });
+      const params: any = { size: 50 };
+      if (statusFilter && statusFilter !== 'all') params.status = statusFilter;
+      const res: any = await api.get('/orders', { params });
       setOrders(res.list || []);
     } catch (e) {
       message.error((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [statusFilter]);
 
   const refreshLogs = useCallback(async () => {
     setLoading(true);
@@ -52,6 +72,7 @@ export default function Orders() {
     });
     const offDelivery = wsClient.on('delivery:result', () => {
       if (tabKey === 'logs') refreshLogs();
+      if (tabKey === 'orders') refreshOrders();
     });
     return () => {
       offStatus();
@@ -62,14 +83,122 @@ export default function Orders() {
   const handleRetry = async (orderId: number) => {
     try {
       const res: any = await api.post(`/delivery/retry/${orderId}`);
-      if (res?.success) {
-        message.success(res.message || '重试成功');
-      } else {
-        message.warning(res?.message || '重试未完成');
-      }
+      if (res?.success) message.success(res.message || '已入队');
+      else message.warning(res?.message || '重试未完成');
       refreshOrders();
     } catch (e) {
       message.error((e as Error).message);
+    }
+  };
+
+  const handleRefreshOne = async (orderId: number) => {
+    try {
+      const res: any = await api.post(`/orders/${orderId}/refresh`);
+      if (res?.success) message.success(res.message || '已刷新');
+      else message.warning(res?.message || '刷新失败');
+      refreshOrders();
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
+  const handleBatchRefresh = async () => {
+    if (!selectedRowKeys.length) {
+      message.warning('请先勾选订单');
+      return;
+    }
+    try {
+      setLoading(true);
+      const res: any = await api.post('/orders/refresh-batch', {
+        ids: selectedRowKeys.map(Number),
+      });
+      message.success(`刷新完成：成功 ${res.ok} / ${res.total}`);
+      if (res.failed) {
+        message.warning(res.errors?.slice(0, 3).join('; '));
+      }
+      setSelectedRowKeys([]);
+      refreshOrders();
+    } catch (e) {
+      message.error((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePoll = async () => {
+    try {
+      await api.post('/orders/poll');
+      message.success('已触发轮询');
+      setTimeout(refreshOrders, 1500);
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
+  const handleExport = async () => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      const qs =
+        statusFilter && statusFilter !== 'all'
+          ? `?status=${encodeURIComponent(statusFilter)}`
+          : '';
+      const resp = await fetch(apiPath(`/orders/export${qs}`), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!resp.ok) throw new Error('导出失败');
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `orders_${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      message.success('已导出 CSV（可用 Excel 打开）');
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
+  const openManualShip = (orderId: number) => {
+    setShipOrderId(orderId);
+    setShipMode('full');
+    setShipOpen(true);
+  };
+
+  const doManualShip = async () => {
+    if (!shipOrderId) return;
+    setShipping(true);
+    try {
+      const res: any = await api.post(`/delivery/manual-ship/${shipOrderId}`, {
+        mode: shipMode,
+      });
+      if (res?.success) message.success(res.message || '已提交');
+      else message.warning(res?.message || '发货失败');
+      setShipOpen(false);
+      refreshOrders();
+    } catch (e) {
+      message.error((e as Error).message);
+    } finally {
+      setShipping(false);
+    }
+  };
+
+  const handleDelete = async (orderId: number) => {
+    try {
+      await api.delete(`/orders/${orderId}`);
+      message.success('已删除');
+      refreshOrders();
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
+  const openDetail = async (row: any) => {
+    try {
+      const res: any = await api.get(`/orders/${row.id}`);
+      setDetail(res || row);
+    } catch {
+      setDetail(row);
     }
   };
 
@@ -85,9 +214,31 @@ export default function Orders() {
   };
 
   const orderColumns = [
-    { title: '订单号', dataIndex: 'bizOrderId', width: 220 },
-    { title: '商品', dataIndex: 'itemTitle', ellipsis: true },
-    { title: '买家', dataIndex: 'buyerNick', width: 100 },
+    { title: '订单号', dataIndex: 'bizOrderId', width: 180, ellipsis: true },
+    {
+      title: '商品',
+      dataIndex: 'itemTitle',
+      ellipsis: true,
+      render: (t: string, row: any) => (
+        <a onClick={() => openDetail(row)}>{t || row.itemId}</a>
+      ),
+    },
+    { title: '买家', dataIndex: 'buyerNick', width: 90, ellipsis: true },
+    {
+      title: '数量',
+      dataIndex: 'quantity',
+      width: 50,
+      render: (q: number) => q || 1,
+    },
+    {
+      title: '规格',
+      width: 100,
+      ellipsis: true,
+      render: (_: any, row: any) =>
+        row.specValue
+          ? `${row.specName || '规格'}:${row.specValue}`
+          : '-',
+    },
     {
       title: '金额',
       dataIndex: 'amount',
@@ -101,30 +252,45 @@ export default function Orders() {
       render: (s: string) => <Tag color={statusColor[s]}>{s}</Tag>,
     },
     {
-      title: '重试',
-      dataIndex: 'retryCount',
-      width: 60,
-    },
-    {
       title: '时间',
       dataIndex: 'createdAt',
-      width: 160,
+      width: 140,
       render: (t: string) => (t ? dayjs(t).format('MM-DD HH:mm:ss') : '-'),
     },
     {
       title: '操作',
-      width: 100,
-      render: (_: any, row: any) =>
-        ['FAILED', 'PENDING', 'IGNORED'].includes(row.status) ? (
-          <Popconfirm
-            title="重新尝试自动发货？"
-            onConfirm={() => handleRetry(row.id)}
+      width: 260,
+      fixed: 'right' as const,
+      render: (_: any, row: any) => (
+        <Space size={4} wrap>
+          <Button
+            size="small"
+            icon={<SyncOutlined />}
+            onClick={() => handleRefreshOne(row.id)}
           >
-            <Button size="small" icon={<RedoOutlined />}>
-              重试
-            </Button>
+            同步
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            ghost
+            icon={<SendOutlined />}
+            onClick={() => openManualShip(row.id)}
+          >
+            发货
+          </Button>
+          {['FAILED', 'PENDING', 'IGNORED'].includes(row.status) && (
+            <Popconfirm title="重新尝试自动发货？" onConfirm={() => handleRetry(row.id)}>
+              <Button size="small" icon={<RedoOutlined />}>
+                重试
+              </Button>
+            </Popconfirm>
+          )}
+          <Popconfirm title="删除该订单记录？" onConfirm={() => handleDelete(row.id)}>
+            <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
-        ) : null,
+        </Space>
+      ),
     },
   ];
 
@@ -198,9 +364,38 @@ export default function Orders() {
             children: (
               <Card
                 extra={
-                  <Button icon={<ReloadOutlined />} onClick={refreshOrders}>
-                    刷新
-                  </Button>
+                  <Space wrap>
+                    <Select
+                      style={{ width: 140 }}
+                      value={statusFilter}
+                      onChange={(v) => setStatusFilter(v)}
+                      options={[
+                        { value: 'all', label: '全部状态' },
+                        { value: 'PENDING', label: '待发货' },
+                        { value: 'DELIVERED', label: '已发货' },
+                        { value: 'FAILED', label: '失败' },
+                        { value: 'IGNORED', label: '已忽略' },
+                        { value: 'REFUNDING', label: '退款中' },
+                        { value: 'REFUNDED', label: '已退款' },
+                      ]}
+                    />
+                    <Button icon={<ReloadOutlined />} onClick={refreshOrders}>
+                      刷新
+                    </Button>
+                    <Button icon={<SyncOutlined />} onClick={handlePoll}>
+                      拉取新订单
+                    </Button>
+                    <Button
+                      icon={<SyncOutlined />}
+                      onClick={handleBatchRefresh}
+                      disabled={!selectedRowKeys.length}
+                    >
+                      批量同步
+                    </Button>
+                    <Button icon={<DownloadOutlined />} onClick={handleExport}>
+                      导出Excel
+                    </Button>
+                  </Space>
                 }
               >
                 <Table
@@ -209,6 +404,11 @@ export default function Orders() {
                   dataSource={orders}
                   loading={loading}
                   size="small"
+                  scroll={{ x: 1200 }}
+                  rowSelection={{
+                    selectedRowKeys,
+                    onChange: setSelectedRowKeys,
+                  }}
                   pagination={{ pageSize: 20 }}
                 />
               </Card>
@@ -238,6 +438,66 @@ export default function Orders() {
           },
         ]}
       />
+
+      <Drawer
+        title="订单详情"
+        open={!!detail}
+        width={420}
+        onClose={() => setDetail(null)}
+      >
+        {detail && (
+          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            <div><b>订单号：</b>{detail.bizOrderId}</div>
+            <div><b>商品：</b>{detail.itemTitle} ({detail.itemId})</div>
+            <div><b>买家：</b>{detail.buyerNick || '-'} / {detail.buyerId || '-'}</div>
+            <div><b>数量：</b>{detail.quantity || 1}</div>
+            <div><b>规格：</b>{detail.specName ? `${detail.specName}:${detail.specValue}` : '-'}</div>
+            <div><b>金额：</b>{detail.amount ? `¥${(detail.amount / 100).toFixed(2)}` : '-'}</div>
+            <div><b>状态：</b><Tag color={statusColor[detail.status]}>{detail.status}</Tag></div>
+            <div><b>闲鱼状态：</b>{detail.xyStatus || '-'}</div>
+            <div><b>会话ID：</b>{detail.conversationId || '-'}</div>
+            <div><b>收货人：</b>{detail.receiverName || '-'}</div>
+            <div><b>电话：</b>{detail.receiverPhone || '-'}</div>
+            <div><b>地址：</b>{detail.receiverAddress || '-'}</div>
+            <div><b>失败原因：</b>{detail.failReason || '-'}</div>
+            <div><b>创建时间：</b>{detail.createdAt ? dayjs(detail.createdAt).format('YYYY-MM-DD HH:mm:ss') : '-'}</div>
+            <Space>
+              <Button type="primary" icon={<SendOutlined />} onClick={() => openManualShip(detail.id)}>
+                手动发货
+              </Button>
+              <Button icon={<SyncOutlined />} onClick={() => handleRefreshOne(detail.id)}>
+                同步详情
+              </Button>
+            </Space>
+          </Space>
+        )}
+      </Drawer>
+
+      <Modal
+        title="手动发货"
+        open={shipOpen}
+        onOk={doManualShip}
+        onCancel={() => setShipOpen(false)}
+        confirmLoading={shipping}
+        okText="确认发货"
+      >
+        <p>请选择发货方式：</p>
+        <Select
+          style={{ width: '100%' }}
+          value={shipMode}
+          onChange={(v) => setShipMode(v)}
+          options={[
+            {
+              value: 'full',
+              label: '完整发货（匹配规则 + 发卡密/内容 + IM 发送）',
+            },
+            {
+              value: 'status_only',
+              label: '仅修改闲鱼发货状态（不消耗卡密，适用于已私发）',
+            },
+          ]}
+        />
+      </Modal>
     </div>
   );
 }

@@ -1,12 +1,12 @@
-import { Column, Entity, Index } from 'typeorm';
+﻿import { Column, Entity, Index } from 'typeorm';
 import { BaseEntity } from '../../../common/entities/base.entity';
 
 /**
  * 自动回复相关实体。
  *
  * 三张表：
- * 1. reply_keywords —— 关键词回复规则（一对多）
- * 2. reply_config   —— 账号回复配置（一对一）
+ * 1. reply_keywords —— 关键词回复规则（一对多，可绑定商品）
+ * 2. reply_config   —— 账号回复配置（一对一，含 AI 议价）
  * 3. reply_handoff  —— 人工接管记录（用于审计/展示，实际标记在 Redis）
  */
 
@@ -15,6 +15,7 @@ export type KeywordMatchType = 'exact' | 'contains';
 /**
  * 关键词回复规则。
  * 一个关键词对应一条回复。accountId 为 null 表示全局生效（所有账号）。
+ * itemId 非空时为商品专属回复，优先于无商品绑定的规则。
  */
 @Entity('reply_keywords')
 @Index('idx_reply_kw_tenant_account', ['tenantId', 'accountId'])
@@ -26,6 +27,10 @@ export class ReplyKeywordEntity extends BaseEntity {
   /** 关联账号（null=全局生效） */
   @Column({ name: 'account_id', type: 'bigint', nullable: true, comment: '账号ID（null=全局）' })
   accountId: number | null;
+
+  /** 商品专属：非空时仅该商品会话命中 */
+  @Column({ type: 'varchar', length: 64, name: 'item_id', nullable: true, comment: '商品ID（商品专属）' })
+  itemId: string | null;
 
   @Column({ type: 'varchar', length: 100, name: 'keyword', comment: '关键词' })
   keyword: string;
@@ -47,7 +52,7 @@ export class ReplyKeywordEntity extends BaseEntity {
 
 /**
  * 账号回复配置（一对一）。
- * 包含默认回复、AI 回复、转人工、冷却等设置。
+ * 包含默认回复、AI 回复、AI 议价、转人工、冷却等设置。
  * ai_api_key 加密存储。
  */
 @Entity('reply_config')
@@ -85,6 +90,32 @@ export class ReplyConfigEntity extends BaseEntity {
 
   @Column({ type: 'float', name: 'ai_temperature', default: 0.7, comment: '温度' })
   aiTemperature: number;
+
+  // ============ AI 议价 ============
+  @Column({ name: 'ai_bargain_enabled', type: 'boolean', default: false, comment: 'AI议价开关' })
+  aiBargainEnabled: boolean;
+
+  /** 最大优惠百分比（如 10 表示最多打九折） */
+  @Column({ name: 'max_discount_percent', type: 'int', default: 10, comment: '最大优惠百分比' })
+  maxDiscountPercent: number;
+
+  /** 最大优惠金额（元） */
+  @Column({ name: 'max_discount_amount', type: 'int', default: 100, comment: '最大优惠金额(元)' })
+  maxDiscountAmount: number;
+
+  /** 同一会话最大议价轮数 */
+  @Column({ name: 'max_bargain_rounds', type: 'int', default: 3, comment: '最大议价轮数' })
+  maxBargainRounds: number;
+
+  /** 触发议价意图的关键词，逗号分隔 */
+  @Column({
+    type: 'varchar',
+    length: 200,
+    name: 'bargain_keywords',
+    default: '便宜,刀,优惠,少点,砍价,议价',
+    comment: '议价关键词',
+  })
+  bargainKeywords: string;
 
   // ============ 转人工 / 冷却 ============
   /** 触发转人工的关键词，逗号分隔（如 "人工,客服,转人工"） */

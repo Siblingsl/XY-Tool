@@ -11,6 +11,8 @@ import {
   SettingOutlined,
   MessageOutlined,
   SafetyCertificateOutlined,
+  FormOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { apiPath } from '../api/config';
@@ -84,9 +86,11 @@ export default function MainLayout() {
     { key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' },
     { key: '/accounts', icon: <UserOutlined />, label: '闲鱼账号' },
     { key: '/products', icon: <ShoppingOutlined />, label: '商品规则' },
+    { key: '/listing-rewrite', icon: <FormOutlined />, label: '爆款仿写' },
     { key: '/kami', icon: <KeyOutlined />, label: '卡密池' },
     { key: '/orders', icon: <OrderedListOutlined />, label: '订单日志' },
     { key: '/auto-reply', icon: <MessageOutlined />, label: '自动回复' },
+    { key: '/ai-settings', icon: <RobotOutlined />, label: 'AI 接入' },
     { key: '/license', icon: <SafetyCertificateOutlined />, label: '激活码' },
     { key: '/profile', icon: <SettingOutlined />, label: '个人中心' },
   ];

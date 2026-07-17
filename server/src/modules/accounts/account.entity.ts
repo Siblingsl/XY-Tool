@@ -47,4 +47,16 @@ export class XianyuAccountEntity extends BaseEntity {
   /** 启用开关：false 时跳过该账号的订单监听与发货 */
   @Column({ name: 'enabled', type: 'boolean', default: true, comment: '是否启用' })
   enabled: boolean;
+
+  /**
+   * 是否在 IM 发卡密后调用闲鱼「确认发货」API。
+   * 也可通过全局 CONFIRM_DELIVERY_ENABLED 开启；账号级优先于全局关闭时的单独开启。
+   */
+  @Column({
+    name: 'auto_confirm',
+    type: 'boolean',
+    default: false,
+    comment: 'IM发货后是否自动确认闲鱼发货状态',
+  })
+  autoConfirm: boolean;
 }

@@ -63,4 +63,18 @@ export class RealtimeService {
   pushAccountExpired(tenantId: number, accountId: number) {
     this.pushToTenant(tenantId, 'account:expired', { accountId });
   }
+
+  /** 账号触发闲鱼风控（FAIL_SYS_USER_VALIDATE 等），系统进入冷静期 */
+  pushAccountCaptcha(
+    tenantId: number,
+    payload: {
+      accountId: number;
+      nickname?: string;
+      pauseUntil: number;
+      remainingMs: number;
+      message: string;
+    },
+  ) {
+    this.pushToTenant(tenantId, 'account:captcha', payload);
+  }
 }

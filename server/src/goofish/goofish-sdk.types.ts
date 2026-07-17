@@ -64,6 +64,14 @@ export interface GoofishClientInstance {
   getToken(): Promise<GoofishMtopRawResponse<{ accessToken?: string }>>;
   refreshToken(): Promise<GoofishMtopRawResponse>;
   getItemInfo(itemId: string): Promise<GoofishMtopRawResponse>;
+  uploadMedia?(
+    filePathOrBuffer: string | Buffer,
+    filename?: string,
+  ): Promise<GoofishMtopRawResponse & { object?: { url?: string; pix?: string } }>;
+  /** 正式上架（业务层勿直接暴露） */
+  publishItem?(opts: Record<string, unknown>): Promise<GoofishMtopRawResponse>;
+  /** 仅保存闲鱼草稿（不上架） */
+  saveItemDraft?(opts: Record<string, unknown>): Promise<GoofishMtopRawResponse>;
 }
 
 export interface GoofishRiskControlInstance {

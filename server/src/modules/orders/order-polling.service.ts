@@ -7,12 +7,20 @@ import { OrderApi } from '../../xianyu/apis/order.api';
 import { GoofishMtopService } from '../../goofish/goofish-mtop.service';
 import { GOOFISH_UA } from '../../goofish/goofish.constants';
 import { handleAccountAuthError } from '../accounts/account-auth.util';
+import { globalRiskGuard, sleep, randomInt } from '../../common/utils/risk-control.util';
 
+/**
+ * 订单轮询 = 自动发货主建单路径。
+ * 拉取待发货列表 → createIfNotExists(PENDING) → 调度器发货。
+ * 不依赖 login.token / WS；WS 付款监听仅作加速。
+ */
 @Injectable()
 export class OrderPollingService {
   private readonly logger = new Logger(OrderPollingService.name);
   private lastPollAt = 0;
   private mockCounter = 0;
+  private polling = false;
+  private loggedDisabled = false;
 
   constructor(
     private readonly config: ConfigService,
@@ -30,17 +38,37 @@ export class OrderPollingService {
     return this.config.get<string>('sign.provider') === 'goofish';
   }
 
-  private get pollIntervalMs(): number {
-    return this.config.get<number>('order.pollIntervalMs', 15000);
+  /** mock 模式始终允许；真实模式看 ORDER_POLL_ENABLED */
+  private get pollEnabled(): boolean {
+    if (this.mockMode) return true;
+    return this.config.get<boolean>('order.pollEnabled', false);
   }
 
-  /** 按 ORDER_POLL_INTERVAL_MS 轮询（每秒检查一次是否到点） */
+  private get pollIntervalMs(): number {
+    return this.config.get<number>('order.pollIntervalMs', 60_000);
+  }
+
   @Interval(1000)
   async pollOrdersTick() {
+    if (!this.pollEnabled) {
+      if (!this.loggedDisabled) {
+        this.loggedDisabled = true;
+        this.logger.warn(
+          '订单轮询已关闭（ORDER_POLL_ENABLED=false）。WS 不可用时将无法自动建单发货，建议保持开启',
+        );
+      }
+      return;
+    }
     const now = Date.now();
     if (now - this.lastPollAt < this.pollIntervalMs) return;
+    if (this.polling) return;
     this.lastPollAt = now;
-    await this.pollOrders();
+    this.polling = true;
+    try {
+      await this.pollOrders();
+    } finally {
+      this.polling = false;
+    }
   }
 
   async pollOrders() {
@@ -49,16 +77,23 @@ export class OrderPollingService {
       return;
     }
 
+    if (!this.pollEnabled) return;
+
     if (!this.useGoofish) {
-      this.logger.warn(
-        '真实订单拉取需要 SIGN_PROVIDER=goofish，当前未启用',
-      );
+      this.logger.warn('真实订单拉取需要 SIGN_PROVIDER=goofish，当前未启用');
       return;
     }
 
     const accounts = await this.getAllEnabledAccounts();
+    for (let i = accounts.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [accounts[i], accounts[j]] = [accounts[j], accounts[i]];
+    }
+
     for (const account of accounts) {
       try {
+        // 滑块仅短冷却，不长时间跳过拉单
+        await globalRiskGuard.waitTurn(`poll:${account.id}`);
         let cookie = this.accountsService.decryptCookie(account);
         const { orders, cookie: updatedCookie } =
           await this.orderApi.fetchSoldOrders(
@@ -79,12 +114,18 @@ export class OrderPollingService {
           cookie = updatedCookie;
         }
 
-        for (const o of orders) {
-          let buyerId = o.buyerId;
-          let buyerNick = o.buyerNick;
+        for (const o of orders as any[]) {
+          let buyerId = o.buyerId as string | undefined;
+          let buyerNick = o.buyerNick as string | undefined;
+          let quantity = 1;
+          let specName: string | undefined;
+          let specValue: string | undefined;
+          let itemId = o.itemId as string;
+          let itemTitle = o.itemTitle as string;
 
           if (!buyerId) {
             try {
+              await globalRiskGuard.waitTurn(account.id);
               const detail = await this.goofishMtop.fetchOrderDetail(
                 cookie,
                 o.bizOrderId,
@@ -98,40 +139,46 @@ export class OrderPollingService {
               }
               buyerId = detail.buyerId;
               buyerNick = detail.buyerNick ?? buyerNick;
+              if (detail.quantity) quantity = detail.quantity;
+              if (detail.specName) specName = detail.specName;
+              if (detail.specValue) specValue = detail.specValue;
+              if (detail.itemId) itemId = detail.itemId;
+              if (detail.itemTitle) itemTitle = detail.itemTitle;
             } catch (e) {
               this.logger.warn(
-                `订单 ${o.bizOrderId} 补 buyerId 失败: ${(e as Error).message}`,
+                `订单 ${o.bizOrderId} 补详情失败: ${(e as Error).message}`,
               );
             }
           }
 
           if (!buyerId) {
             this.logger.warn(
-              `订单 ${o.bizOrderId} 缺少 buyerId，跳过入库（发货阶段会再次尝试）`,
+              `订单 ${o.bizOrderId} 暂无 buyerId，仍入库，发货阶段将再尝试`,
             );
-            continue;
           }
 
+          const createTime = o.createTime || o.orderCreatedAt;
           const { created, order } = await this.ordersService.createIfNotExists({
             tenantId: account.tenantId,
             accountId: account.id,
             bizOrderId: o.bizOrderId,
-            itemId: o.itemId,
-            itemTitle: o.itemTitle,
+            itemId: itemId || 'unknown',
+            itemTitle: itemTitle || '闲鱼商品',
             buyerNick,
             buyerId,
             amount: o.amount,
-            orderCreatedAt: o.createTime
-              ? new Date(o.createTime)
-              : undefined,
+            quantity,
+            specName,
+            specValue,
+            xyStatus: o.tradeStatus,
+            orderCreatedAt: createTime ? new Date(createTime) : undefined,
           });
           if (created) {
             this.logger.log(
-              `真实订单入库: ${o.bizOrderId} (${o.itemTitle})`,
+              `轮询建单: ${o.bizOrderId} (${itemTitle}) buyer=${buyerId || 'pending'} → 将自动发货`,
             );
           }
 
-          // 退款中的订单标记为 REFUNDING（被动感知，不丢弃）
           if (o.inRefund && order.status !== 'REFUNDED') {
             await this.ordersService.markRefunding(
               order.id,
@@ -139,6 +186,8 @@ export class OrderPollingService {
             );
           }
         }
+
+        await sleep(randomInt(1500, 4000));
       } catch (err) {
         await handleAccountAuthError(
           this.accountsService,
@@ -178,6 +227,7 @@ export class OrderPollingService {
       buyerNick: buyer,
       buyerId: `mock_buyer_${this.mockCounter}`,
       amount: Math.floor(Math.random() * 5000 + 100),
+      quantity: 1,
       orderCreatedAt: new Date(),
     });
 
@@ -190,5 +240,73 @@ export class OrderPollingService {
 
   async triggerPoll() {
     await this.pollOrders();
+  }
+
+  async refreshOrder(
+    orderId: number,
+    tenantId: number,
+  ): Promise<{ success: boolean; message: string }> {
+    const order = await this.ordersService.findByIdForTenant(orderId, tenantId);
+    if (!order) return { success: false, message: '订单不存在' };
+
+    const accounts = await this.accountsService.listEnabled(tenantId);
+    const account = accounts.find((a) => a.id === order.accountId);
+    if (!account) return { success: false, message: '账号不可用' };
+
+    if (!this.useGoofish) {
+      return { success: false, message: '仅 goofish 模式支持刷新' };
+    }
+
+    try {
+      let cookie = this.accountsService.decryptCookie(account);
+      await globalRiskGuard.waitTurn(account.id);
+      const detail = await this.goofishMtop.fetchOrderDetail(
+        cookie,
+        order.bizOrderId,
+      );
+      if (detail.cookie !== cookie) {
+        await this.accountsService.updateCookieIfChanged(account.id, detail.cookie);
+      }
+
+      const patch: Record<string, unknown> = {};
+      if (detail.buyerId) patch.buyerId = detail.buyerId;
+      if (detail.buyerNick) patch.buyerNick = detail.buyerNick;
+      if (detail.itemId) patch.itemId = detail.itemId;
+      if (detail.itemTitle) patch.itemTitle = detail.itemTitle;
+      if (detail.amount != null) patch.amount = detail.amount;
+      if (detail.quantity) patch.quantity = detail.quantity;
+      if (detail.specName) patch.specName = detail.specName;
+      if (detail.specValue) patch.specValue = detail.specValue;
+      if (detail.receiverName) patch.receiverName = detail.receiverName;
+      if (detail.receiverPhone) patch.receiverPhone = detail.receiverPhone;
+      if (detail.receiverAddress) patch.receiverAddress = detail.receiverAddress;
+      if (detail.xyStatus) patch.xyStatus = detail.xyStatus;
+
+      await this.ordersService.patchOrderFields(order.id, patch as any);
+      return { success: true, message: '订单详情已刷新' };
+    } catch (e) {
+      await handleAccountAuthError(this.accountsService, account.id, e);
+      return { success: false, message: (e as Error).message };
+    }
+  }
+
+  async refreshOrdersBatch(
+    orderIds: number[],
+    tenantId: number,
+  ): Promise<{ total: number; ok: number; failed: number; errors: string[] }> {
+    let ok = 0;
+    let failed = 0;
+    const errors: string[] = [];
+    const ids = orderIds.slice(0, 20);
+    for (const id of ids) {
+      const r = await this.refreshOrder(id, tenantId);
+      if (r.success) ok++;
+      else {
+        failed++;
+        errors.push(`#${id}: ${r.message}`);
+      }
+      await sleep(randomInt(800, 1500));
+    }
+    return { total: ids.length, ok, failed, errors };
   }
 }

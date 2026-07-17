@@ -1,6 +1,6 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+﻿import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, LessThan } from 'typeorm';
+import { Repository, Between, LessThan, In } from 'typeorm';
 import { OrderEntity, OrderStatus } from './order.entity';
 import { RealtimeService } from '../realtime/realtime.service';
 
@@ -10,6 +10,7 @@ import { RealtimeService } from '../realtime/realtime.service';
  * 订单数据来源有两种：
  *  1. 真实环境：从闲鱼 mtop 接口拉取（由 OrderPollingService 调用）
  *  2. Mock 模式：由 MockOrderGenerator 生成假订单
+ *  3. IM 付款消息即时建单（ImPaymentListenerService）
  */
 @Injectable()
 export class OrdersService {
@@ -37,19 +38,47 @@ export class OrdersService {
     buyerId?: string;
     conversationId?: string;
     amount?: number;
+    quantity?: number;
+    specName?: string;
+    specValue?: string;
+    receiverName?: string;
+    receiverPhone?: string;
+    receiverAddress?: string;
+    xyStatus?: string;
     orderCreatedAt?: Date;
   }): Promise<{ created: boolean; order: OrderEntity }> {
     const existing = await this.findByBizOrderId(input.bizOrderId);
     if (existing) {
+      const patch: Partial<OrderEntity> = {};
       if (input.conversationId && !existing.conversationId) {
-        await this.patchConversationId(input.bizOrderId, input.conversationId);
-        existing.conversationId = input.conversationId;
+        patch.conversationId = input.conversationId;
+      }
+      if (input.buyerId && !existing.buyerId) {
+        patch.buyerId = input.buyerId;
+        if (input.buyerNick) patch.buyerNick = input.buyerNick;
+      }
+      if (input.quantity && input.quantity > (existing.quantity || 1)) {
+        patch.quantity = input.quantity;
+      }
+      if (input.specName && !existing.specName) patch.specName = input.specName;
+      if (input.specValue && !existing.specValue) patch.specValue = input.specValue;
+      if (input.itemId && (!existing.itemId || existing.itemId === 'unknown')) {
+        patch.itemId = input.itemId;
+      }
+      if (input.itemTitle && existing.itemTitle === '闲鱼商品') {
+        patch.itemTitle = input.itemTitle;
+      }
+      if (input.xyStatus) patch.xyStatus = input.xyStatus;
+      if (Object.keys(patch).length > 0) {
+        await this.repo.update(existing.id, patch);
+        Object.assign(existing, patch);
       }
       return { created: false, order: existing };
     }
 
     const entity = this.repo.create({
       ...input,
+      quantity: input.quantity && input.quantity > 0 ? input.quantity : 1,
       status: 'PENDING',
       retryCount: 0,
     });
@@ -79,50 +108,42 @@ export class OrdersService {
     await this.repo.update(id, { status, ...extra });
   }
 
-  /** 标记为已分配（匹配到商品规则+取到卡密后） */
+  /** 分配发货规则 */
   async markAssigned(id: number, productId: number): Promise<void> {
     await this.updateStatus(id, 'ASSIGNED', { productId });
   }
 
-  /** 标记发货成功 */
+  /** 标记已发货 */
   async markDelivered(id: number): Promise<void> {
     const order = await this.repo.findOne({ where: { id } });
-    if (order) {
-      await this.repo.update(id, { status: 'DELIVERED' });
-      this.logger.log(`订单已发货: ${id}`);
-      this.realtime.pushOrderStatus(order.tenantId, {
-        bizOrderId: order.bizOrderId,
-        status: 'DELIVERED',
-      });
-    }
+    if (!order) return;
+    await this.repo.update(id, { status: 'DELIVERED' });
+    this.realtime.pushOrderStatus(order.tenantId, {
+      bizOrderId: order.bizOrderId,
+      status: 'DELIVERED',
+    });
   }
 
-  /** 标记发货失败 */
+  /** 标记失败 */
   async markFailed(id: number, reason: string): Promise<void> {
     const order = await this.repo.findOne({ where: { id } });
-    if (order) {
-      await this.repo.update(id, { status: 'FAILED', failReason: reason });
-      this.logger.warn(`订单发货失败: ${id} - ${reason}`);
-      this.realtime.pushOrderStatus(order.tenantId, {
-        bizOrderId: order.bizOrderId,
-        status: 'FAILED',
-      });
-    }
+    if (!order) return;
+    await this.repo.update(id, { status: 'FAILED', failReason: reason });
+    this.realtime.pushOrderStatus(order.tenantId, {
+      bizOrderId: order.bizOrderId,
+      status: 'FAILED',
+    });
   }
 
-  /** 标记忽略（无匹配规则等） */
+  /** 标记忽略 */
   async markIgnored(id: number, reason?: string): Promise<void> {
     await this.updateStatus(id, 'IGNORED', { failReason: reason });
   }
 
-  /**
-   * 标记订单退款中（买家申请退款）。
-   * 仅被动感知记录，不主动处置退款。已发放的卡密不回收（避免重复使用）。
-   */
+  /** 标记退款中 */
   async markRefunding(id: number, reason?: string): Promise<void> {
     const order = await this.repo.findOne({ where: { id } });
     if (!order) return;
-    // 已退款终态不回退
     if (order.status === 'REFUNDED') return;
     await this.repo.update(id, {
       status: 'REFUNDING',
@@ -161,10 +182,19 @@ export class OrdersService {
     });
   }
 
-  /** 列出租户下所有订单（分页） */
-  async listByTenant(tenantId: number, page = 1, size = 20) {
+  /** 列出租户下所有订单（分页 + 可选状态筛选） */
+  async listByTenant(
+    tenantId: number,
+    page = 1,
+    size = 20,
+    status?: string,
+  ) {
+    const where: Record<string, unknown> = { tenantId };
+    if (status && status !== 'all') {
+      where.status = status;
+    }
     const [list, total] = await this.repo.findAndCount({
-      where: { tenantId },
+      where,
       order: { createdAt: 'DESC' },
       skip: (page - 1) * size,
       take: size,
@@ -172,24 +202,37 @@ export class OrdersService {
     return { list, total, page, size };
   }
 
-  /** 获取待重试的订单（nextRetryAt 已过且 status=PENDING 且 retryCount < 3） */
+  /**
+   * 获取待重试的订单。
+   * retryCount 在 [1, MAX_RETRIES) 内可再入队；最终失败由 processOrder 标 FAILED。
+   */
   async getRetryableOrders(): Promise<OrderEntity[]> {
-    return this.repo.find({
-      where: {
-        status: 'PENDING',
-        retryCount: LessThan(3),
-        nextRetryAt: LessThan(new Date()),
-      },
-    });
+    const now = new Date();
+    return this.repo
+      .createQueryBuilder('o')
+      .where('o.status = :status', { status: 'PENDING' })
+      .andWhere('o.retry_count > 0')
+      .andWhere('o.retry_count < 3')
+      .andWhere('(o.next_retry_at IS NULL OR o.next_retry_at <= :now)', { now })
+      .orderBy('o.next_retry_at', 'ASC', 'NULLS FIRST')
+      .take(20)
+      .getMany();
   }
 
-  /** 获取新订单（PENDING + retryCount=0，即刚拉取尚未处理） */
+  /**
+   * 获取新订单（PENDING + retryCount=0）。
+   * 尊重 nextRetryAt：延时发货 / 冷却等待期间不重复捞取。
+   */
   async getNewOrders(limit = 5): Promise<OrderEntity[]> {
-    return this.repo.find({
-      where: { status: 'PENDING', retryCount: 0 },
-      order: { createdAt: 'ASC' },
-      take: limit,
-    });
+    const now = new Date();
+    return this.repo
+      .createQueryBuilder('o')
+      .where('o.status = :status', { status: 'PENDING' })
+      .andWhere('o.retry_count = 0')
+      .andWhere('(o.next_retry_at IS NULL OR o.next_retry_at <= :now)', { now })
+      .orderBy('o.created_at', 'ASC')
+      .take(limit)
+      .getMany();
   }
 
   /** 获取所有待处理订单（新订单 + 待重试订单），供调度器使用 */
@@ -199,6 +242,16 @@ export class OrdersService {
     const seen = new Set(fresh.map((o) => o.id));
     const merged = [...fresh, ...retry.filter((o) => !seen.has(o.id))];
     return merged.slice(0, limit);
+  }
+
+  /**
+   * 延后处理（不增加 retryCount）：延时发货、订单冷却等。
+   * 订单保持 PENDING，调度器在 nextRetryAt 之后再捞。
+   */
+  async deferUntil(id: number, nextRetryAt: Date, reason?: string): Promise<void> {
+    const patch: Partial<OrderEntity> = { nextRetryAt, status: 'PENDING' };
+    if (reason) patch.failReason = reason;
+    await this.repo.update(id, patch);
   }
 
   async findByIdForTenant(id: number, tenantId: number): Promise<OrderEntity | null> {
@@ -226,6 +279,16 @@ export class OrdersService {
     return this.repo.findOneOrFail({ where: { id } });
   }
 
+  /** 手动完整发货：允许已发货订单强制重置（补发） */
+  async forceResetForManualShip(id: number): Promise<void> {
+    await this.repo.update(id, {
+      status: 'PENDING',
+      retryCount: 0,
+      nextRetryAt: null,
+      failReason: null,
+    });
+  }
+
   /** 补写买家信息（订单详情 API 回填） */
   async patchBuyerInfo(
     id: number,
@@ -235,6 +298,24 @@ export class OrdersService {
     const patch: Partial<OrderEntity> = { buyerId };
     if (buyerNick) patch.buyerNick = buyerNick;
     await this.repo.update(id, patch);
+  }
+
+  /** 通用字段补丁（详情同步 / 规格数量等） */
+  async patchOrderFields(
+    id: number,
+    patch: Partial<OrderEntity>,
+  ): Promise<void> {
+    if (!patch || Object.keys(patch).length === 0) return;
+    // 禁止通过此接口改租户/订单号
+    const {
+      id: _id,
+      tenantId: _t,
+      bizOrderId: _b,
+      createdAt: _c,
+      updatedAt: _u,
+      ...safe
+    } = patch as OrderEntity & Record<string, unknown>;
+    await this.repo.update(id, safe as Partial<OrderEntity>);
   }
 
   /** 卡在 DELIVERING 超过阈值的订单（进程崩溃等） */
@@ -271,5 +352,83 @@ export class OrdersService {
       result[row.status] = Number(row.count);
     }
     return result;
+  }
+
+  /** 批量按 ID 查询（刷新用） */
+  async findByIdsForTenant(
+    ids: number[],
+    tenantId: number,
+  ): Promise<OrderEntity[]> {
+    if (!ids.length) return [];
+    return this.repo.find({
+      where: { id: In(ids), tenantId },
+    });
+  }
+
+  /** 删除订单（仅租户内） */
+  async remove(id: number, tenantId: number): Promise<void> {
+    await this.repo.delete({ id, tenantId });
+  }
+
+  /** 导出订单为 CSV（Excel 可直接打开） */
+  async exportCsv(tenantId: number, status?: string): Promise<string> {
+    const where: Record<string, unknown> = { tenantId };
+    if (status && status !== 'all') where.status = status;
+    const list = await this.repo.find({
+      where,
+      order: { createdAt: 'DESC' },
+      take: 5000,
+    });
+
+    const escape = (v: unknown) => {
+      const s = v == null ? '' : String(v);
+      if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+
+    const headers = [
+      'id',
+      'bizOrderId',
+      'itemId',
+      'itemTitle',
+      'buyerNick',
+      'buyerId',
+      'amount',
+      'quantity',
+      'specName',
+      'specValue',
+      'status',
+      'receiverName',
+      'receiverPhone',
+      'receiverAddress',
+      'failReason',
+      'createdAt',
+    ];
+    const lines = [headers.join(',')];
+    for (const o of list) {
+      lines.push(
+        [
+          o.id,
+          o.bizOrderId,
+          o.itemId,
+          o.itemTitle,
+          o.buyerNick,
+          o.buyerId,
+          o.amount,
+          o.quantity,
+          o.specName,
+          o.specValue,
+          o.status,
+          o.receiverName,
+          o.receiverPhone,
+          o.receiverAddress,
+          o.failReason,
+          o.createdAt?.toISOString?.() ?? o.createdAt,
+        ]
+          .map(escape)
+          .join(','),
+      );
+    }
+    return '\uFEFF' + lines.join('\n');
   }
 }

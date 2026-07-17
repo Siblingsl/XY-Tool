@@ -13,7 +13,7 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import api from '../api';
 
 /**
@@ -178,6 +178,32 @@ export default function KamiPool() {
     },
   ];
 
+
+  const handleExport = async () => {
+    if (!selectedPool) {
+      message.warning('请先选择卡密池');
+      return;
+    }
+    try {
+      const token = localStorage.getItem('accessToken');
+      const { apiPath } = await import('../api/config');
+      const resp = await fetch(apiPath(`/kami/items/${selectedPool}/export`), {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!resp.ok) throw new Error('导出失败');
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `kami-pool-${selectedPool}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      message.success('已导出 CSV');
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  };
+
   return (
     <div>
       <Typography.Title level={4}>卡密池管理</Typography.Title>
@@ -212,9 +238,14 @@ export default function KamiPool() {
                 title={selectedPool ? `池 #${selectedPool} 的卡密` : '请先在"卡密池"中点击"查看卡密"'}
                 extra={
                   selectedPool && (
-                    <Button type="primary" icon={<PlusOutlined />} onClick={() => setItemModal(true)}>
-                      批量添加
-                    </Button>
+                    <Space>
+                      <Button icon={<DownloadOutlined />} onClick={handleExport}>
+                        导出CSV
+                      </Button>
+                      <Button type="primary" icon={<PlusOutlined />} onClick={() => setItemModal(true)}>
+                        批量添加
+                      </Button>
+                    </Space>
                   )
                 }
               >

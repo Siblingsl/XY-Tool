@@ -13,7 +13,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import { ProductsService } from './products.service';
-import { IsString, IsNotEmpty, IsIn, IsNumber, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsNotEmpty, IsIn, IsNumber, IsOptional, IsBoolean, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateProductDto {
@@ -57,6 +57,36 @@ export class CreateProductDto {
   @IsString()
   @IsOptional()
   remark?: string;
+
+  @ApiProperty({ description: '延时发货秒数(0-3600)', required: false, default: 0 })
+  @IsInt()
+  @Min(0)
+  @Max(3600)
+  @IsOptional()
+  @Type(() => Number)
+  delaySeconds?: number;
+
+  @ApiProperty({ description: '多数量发货', required: false, default: false })
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => Boolean)
+  multiQuantity?: boolean;
+
+  @ApiProperty({ description: '是否多规格规则', required: false, default: false })
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => Boolean)
+  isMultiSpec?: boolean;
+
+  @ApiProperty({ description: '规格名', required: false })
+  @IsString()
+  @IsOptional()
+  specName?: string;
+
+  @ApiProperty({ description: '规格值', required: false })
+  @IsString()
+  @IsOptional()
+  specValue?: string;
 }
 
 export class UpdateProductDto {
@@ -102,6 +132,37 @@ export class UpdateProductDto {
   @IsString()
   @IsOptional()
   remark?: string;
+
+
+  @ApiProperty({ description: '延时发货秒数', required: false })
+  @IsInt()
+  @Min(0)
+  @Max(3600)
+  @IsOptional()
+  @Type(() => Number)
+  delaySeconds?: number;
+
+  @ApiProperty({ description: '多数量发货', required: false })
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => Boolean)
+  multiQuantity?: boolean;
+
+  @ApiProperty({ description: '是否多规格规则', required: false })
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => Boolean)
+  isMultiSpec?: boolean;
+
+  @ApiProperty({ description: '规格名', required: false })
+  @IsString()
+  @IsOptional()
+  specName?: string;
+
+  @ApiProperty({ description: '规格值', required: false })
+  @IsString()
+  @IsOptional()
+  specValue?: string;
 
   @ApiProperty({ description: '是否启用', required: false })
   @IsBoolean()

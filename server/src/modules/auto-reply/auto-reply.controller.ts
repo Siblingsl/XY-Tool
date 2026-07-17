@@ -3,14 +3,17 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpException,
   HttpStatus,
   Param,
   Post,
   Put,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiTags,
   ApiBearerAuth,
@@ -23,8 +26,11 @@ import {
   IsOptional,
   IsBoolean,
   IsInt,
+  IsNumber,
   IsIn,
   MaxLength,
+  Min,
+  Max,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -33,6 +39,19 @@ import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import { AutoReplyService } from './auto-reply.service';
 
 // ============ DTO ============
+
+class ImportKeywordsDto {
+  @ApiProperty({ description: 'CSV 文本内容' })
+  @IsString()
+  @IsNotEmpty()
+  text: string;
+
+  @ApiProperty({ description: '导入到指定账号（可选）', required: false })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  accountId?: number;
+}
 
 class CreateKeywordDto {
   @ApiProperty({ description: '关联账号ID（不填=全局生效）', required: false })
@@ -67,6 +86,11 @@ class CreateKeywordDto {
   @IsInt()
   @Type(() => Number)
   sortOrder?: number;
+
+  @ApiProperty({ description: '商品ID（商品专属回复，不填=通用）', required: false })
+  @IsOptional()
+  @IsString()
+  itemId?: string;
 }
 
 class UpdateKeywordDto {
@@ -97,6 +121,11 @@ class UpdateKeywordDto {
   @IsInt()
   @Type(() => Number)
   sortOrder?: number;
+
+  @ApiProperty({ description: '商品ID（商品专属，空字符串清除）', required: false })
+  @IsOptional()
+  @IsString()
+  itemId?: string | null;
 }
 
 class UpdateConfigDto {
@@ -139,9 +168,40 @@ class UpdateConfigDto {
 
   @ApiProperty({ description: '温度(0-2)', required: false })
   @IsOptional()
-  @IsInt()
+  @IsNumber()
+  @Min(0)
+  @Max(2)
   @Type(() => Number)
   aiTemperature?: number;
+
+  @ApiProperty({ description: 'AI议价开关', required: false })
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  aiBargainEnabled?: boolean;
+
+  @ApiProperty({ description: '最大优惠百分比', required: false })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  maxDiscountPercent?: number;
+
+  @ApiProperty({ description: '最大优惠金额(元)', required: false })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  maxDiscountAmount?: number;
+
+  @ApiProperty({ description: '最大议价轮数', required: false })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  maxBargainRounds?: number;
+
+  @ApiProperty({ description: '议价关键词(逗号分隔)', required: false })
+  @IsOptional()
+  @IsString()
+  bargainKeywords?: string;
 
   @ApiProperty({ description: '转人工关键词(逗号分隔)', required: false })
   @IsOptional()
@@ -204,6 +264,7 @@ export class AutoReplyController {
     return this.service.createKeyword({
       tenantId: user.tenantId,
       accountId: dto.accountId ?? null,
+      itemId: dto.itemId?.trim() || null,
       keyword: dto.keyword,
       matchType: dto.matchType as any,
       replyContent: dto.replyContent,
@@ -232,6 +293,37 @@ export class AutoReplyController {
     return this.service.deleteKeyword(Number(id), user.tenantId);
   }
 
+  @Get('keywords/export')
+  @ApiOperation({ summary: '导出关键词 CSV' })
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  async exportKeywords(
+    @CurrentUser() user: JwtPayload,
+    @Res() res: Response,
+  ) {
+    const csv = await this.service.exportKeywordsCsv(user.tenantId);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="keywords_${Date.now()}.csv"`,
+    );
+    res.send(csv);
+  }
+
+  @Post('keywords/import')
+  @ApiOperation({
+    summary: '导入关键词 CSV',
+    description: '格式: keyword,matchType,replyContent[,itemId]',
+  })
+  importKeywords(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ImportKeywordsDto,
+  ) {
+    return this.service.importKeywordsCsv(
+      user.tenantId,
+      dto.text || '',
+      dto.accountId,
+    );
+  }
+
   // ============ 账号配置 ============
 
   @Get('config/:accountId')
@@ -258,6 +350,11 @@ export class AutoReplyController {
         aiTemperature: 0.7,
         transferKeywords: '人工,客服',
         cooldownSeconds: 3,
+        aiBargainEnabled: false,
+        maxDiscountPercent: 10,
+        maxDiscountAmount: 100,
+        maxBargainRounds: 3,
+        bargainKeywords: '便宜,刀,优惠,少点,砍价,议价',
       };
     }
     return cfg;

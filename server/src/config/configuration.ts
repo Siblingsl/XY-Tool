@@ -58,8 +58,17 @@ export default () => ({
   },
 
   order: {
+    /**
+     * 轮询 mtop「待发货订单」——自动发货主建单路径（不依赖 IM token）。
+     * WS 付款监听仅加速感知；token 被风控时仍可靠轮询建单。
+     */
+    pollEnabled:
+      process.env.ORDER_POLL_ENABLED != null
+        ? String(process.env.ORDER_POLL_ENABLED) === 'true'
+        : true,
+    /** 轮询间隔，默认 1 分钟 */
     pollIntervalMs: parseInt(
-      process.env.ORDER_POLL_INTERVAL_MS || '15000',
+      process.env.ORDER_POLL_INTERVAL_MS || '60000',
       10,
     ),
     mockMode:
@@ -68,12 +77,20 @@ export default () => ({
         : (process.env.SIGN_PROVIDER || 'mock') === 'mock',
   },
 
-  /** IM WebSocket 付款消息监听 */
+  /**
+   * IM WebSocket 付款监听（可选加速）。
+   * 需要 login.token；被 USER_VALIDATE 时自动退避，不打断轮询发货。
+   */
   im: {
     paymentListenEnabled:
       process.env.IM_PAYMENT_LISTEN_ENABLED == null
         ? (process.env.SIGN_PROVIDER || 'mock') === 'goofish'
         : String(process.env.IM_PAYMENT_LISTEN_ENABLED) === 'true',
+    /** login.token 风控后多久再试连 WS（毫秒），默认 30 分钟 */
+    captchaBackoffMs: parseInt(
+      process.env.IM_WS_CAPTCHA_BACKOFF_MS || '1800000',
+      10,
+    ),
   },
 
   /** Cookie 主动健康检查 */
@@ -98,6 +115,11 @@ export default () => ({
   /** 虚拟商品 IM 发送后是否调用闲鱼「确认发货」 */
   delivery: {
     confirmEnabled: String(process.env.CONFIRM_DELIVERY_ENABLED) === 'true',
+  },
+
+  /** 商品草稿本地图片目录（相对 server 工作目录） */
+  itemDraft: {
+    uploadDir: process.env.ITEM_DRAFT_UPLOAD_DIR || 'uploads/item-drafts',
   },
 
   cors: {

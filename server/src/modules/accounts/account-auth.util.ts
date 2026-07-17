@@ -1,6 +1,9 @@
 import { Logger } from '@nestjs/common';
 import { AccountsService } from './accounts.service';
-import { isGoofishSessionExpired } from '../../goofish/goofish-error.util';
+import {
+  isGoofishCaptchaChallenge,
+  isGoofishSessionExpired,
+} from '../../goofish/goofish-error.util';
 
 const logger = new Logger('AccountAuth');
 
@@ -28,15 +31,23 @@ async function runExpiredHandlers(accountId: number): Promise<void> {
 }
 
 /**
- * 检测到 Session 过期时：
- * 1. 标记账号 expired + 禁用
- * 2. 触发副作用（停止 WS 监听等）
+ * 账号鉴权错误处理（尽量克制）：
+ * - 滑块/USER_VALIDATE：仅 warn，不禁用、不冷静期
+ * - 真正 Session 过期：markExpired + 停 WS
  */
 export async function handleAccountAuthError(
   accounts: AccountsService,
   accountId: number,
   error: unknown,
 ): Promise<boolean> {
+  // 闲鱼常见风控码：只提醒，不当作掉线
+  if (isGoofishCaptchaChallenge(error)) {
+    logger.warn(
+      `账号 ${accountId} 闲鱼风控提示（滑块/USER_VALIDATE），不禁用账号，稍后自动重试`,
+    );
+    return true;
+  }
+
   if (!isGoofishSessionExpired(error)) return false;
 
   const already = await accounts.findByIdUnsafe(accountId);

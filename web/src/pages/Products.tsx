@@ -1,22 +1,5 @@
 import { useEffect, useState } from 'react';
-import {
-  message,
-  Button,
-  Card,
-  Form,
-  Input,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Switch,
-  Table,
-  Tag,
-  Typography,
-  Image,
-  Empty,
-  Tooltip,
-} from 'antd';
+import { Button, Card, Empty, Form, Image, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { PlusOutlined, ReloadOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import api from '../api';
 
@@ -75,6 +58,7 @@ export default function Products() {
   const openAddModal = () => {
     setEditId(null);
     form.resetFields();
+    form.setFieldsValue({ delaySeconds: 0, multiQuantity: false, isMultiSpec: false });
     setModalOpen(true);
   };
 
@@ -102,6 +86,11 @@ export default function Products() {
       itemId: row.itemId,
       title: row.title,
       deliveryType: row.deliveryType,
+          delaySeconds: row.delaySeconds ?? 0,
+          multiQuantity: !!row.multiQuantity,
+          isMultiSpec: !!row.isMultiSpec,
+          specName: row.specName ?? undefined,
+          specValue: row.specValue ?? undefined,
       kamiPoolId: row.kamiPoolId ?? undefined,
       licenseTypeCode: row.licenseTypeCode ?? undefined,
       fixedContent: row.fixedContent ?? undefined,
@@ -391,6 +380,29 @@ export default function Products() {
             shouldUpdate={(prev, cur) => prev.deliveryType !== cur.deliveryType}
           >
             {({ getFieldValue }) => renderDeliveryFields(getFieldValue('deliveryType'))}
+          </Form.Item>
+          <Form.Item name="delaySeconds" label="延时发货（秒）" extra="付款后等待 N 秒再发，建议 0~120，过大影响体验">
+            <InputNumber min={0} max={3600} style={{ width: '100%' }} placeholder="0=立即" />
+          </Form.Item>
+          <Form.Item name="multiQuantity" label="多数量发货" valuePropName="checked" extra="开启后按订单购买数量连续发送多份卡密/激活码（上限20）">
+            <Switch checkedChildren="开" unCheckedChildren="关" />
+          </Form.Item>
+          <Form.Item name="isMultiSpec" label="多规格匹配" valuePropName="checked" extra="开启后仅当订单规格名/值完全匹配时才用本规则">
+            <Switch checkedChildren="开" unCheckedChildren="关" />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.isMultiSpec !== cur.isMultiSpec}>
+            {({ getFieldValue }) =>
+              getFieldValue('isMultiSpec') ? (
+                <>
+                  <Form.Item name="specName" label="规格名" rules={[{ required: true, message: '请填写规格名' }]}>
+                    <Input placeholder="如：套餐" />
+                  </Form.Item>
+                  <Form.Item name="specValue" label="规格值" rules={[{ required: true, message: '请填写规格值' }]}>
+                    <Input placeholder="如：月卡" />
+                  </Form.Item>
+                </>
+              ) : null
+            }
           </Form.Item>
           <Form.Item name="remark" label="发货附言（可选）">
             <Input.TextArea rows={2} placeholder="如：有问题联系客服" />

@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
@@ -14,7 +15,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import { DeliveryLogEntity } from './delivery-log.entity';
 import { DeliveryService } from './delivery.service';
-import { IsNumber, IsOptional } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
 
 class DeliveryLogQueryDto {
@@ -37,8 +38,21 @@ class DeliveryLogQueryDto {
   size?: number;
 }
 
+class ManualShipDto {
+  @ApiProperty({
+    description: '发货模式：full=匹配规则发卡密并发送；status_only=仅改闲鱼发货状态',
+    enum: ['full', 'status_only'],
+    required: false,
+    default: 'full',
+  })
+  @IsString()
+  @IsIn(['full', 'status_only'])
+  @IsOptional()
+  mode?: 'full' | 'status_only';
+}
+
 /**
- * 发货日志与手动重试接口。
+ * 发货日志与手动重试/手动发货接口。
  */
 @ApiTags('发货')
 @ApiBearerAuth('access-token')
@@ -62,7 +76,7 @@ export class DeliveryController {
     const where: Record<string, unknown> = { tenantId: user.tenantId };
     if (query.orderId) where['orderId'] = query.orderId;
 
-    const [list, total] = await this.logRepo.find({
+    const [list, total] = await this.logRepo.findAndCount({
       where,
       order: { createdAt: 'DESC' },
       skip: (page - 1) * size,
@@ -78,5 +92,23 @@ export class DeliveryController {
     @Param('orderId') orderId: string,
   ) {
     return this.deliveryService.retryDeliver(Number(orderId), user.tenantId);
+  }
+
+  @Post('manual-ship/:orderId')
+  @ApiOperation({
+    summary: '手动发货/补发',
+    description:
+      'full=完整发货（匹配规则+发卡密+IM）；status_only=仅调用闲鱼确认发货不消耗卡密',
+  })
+  manualShip(
+    @CurrentUser() user: JwtPayload,
+    @Param('orderId') orderId: string,
+    @Body() dto: ManualShipDto,
+  ) {
+    return this.deliveryService.manualShip(
+      Number(orderId),
+      user.tenantId,
+      dto.mode || 'full',
+    );
   }
 }

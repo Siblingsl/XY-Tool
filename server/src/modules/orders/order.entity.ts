@@ -1,4 +1,4 @@
-import { Column, Entity, Index } from 'typeorm';
+﻿import { Column, Entity, Index } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 
 /**
@@ -75,6 +75,32 @@ export class OrderEntity extends BaseEntity {
   /** 订单金额（分） */
   @Column({ type: 'bigint', name: 'amount', default: 0, comment: '订单金额(分)' })
   amount: number;
+
+  /** 购买数量（多数量发货用） */
+  @Column({ name: 'quantity', type: 'int', default: 1, comment: '购买数量' })
+  quantity: number;
+
+  /** 规格名（多规格商品） */
+  @Column({ type: 'varchar', length: 100, name: 'spec_name', nullable: true, comment: '规格名' })
+  specName: string | null;
+
+  /** 规格值 */
+  @Column({ type: 'varchar', length: 200, name: 'spec_value', nullable: true, comment: '规格值' })
+  specValue: string | null;
+
+  /** 收货人姓名（实物可选，虚拟一般为空） */
+  @Column({ type: 'varchar', length: 100, name: 'receiver_name', nullable: true, comment: '收货人' })
+  receiverName: string | null;
+
+  @Column({ type: 'varchar', length: 32, name: 'receiver_phone', nullable: true, comment: '收货电话' })
+  receiverPhone: string | null;
+
+  @Column({ type: 'text', name: 'receiver_address', nullable: true, comment: '收货地址' })
+  receiverAddress: string | null;
+
+  /** 闲鱼侧原始状态文案/码（同步用） */
+  @Column({ type: 'varchar', length: 50, name: 'xy_status', nullable: true, comment: '闲鱼状态' })
+  xyStatus: string | null;
 
   /** 订单状态 */
   @Column({ length: 20, default: 'PENDING', comment: '订单状态' })

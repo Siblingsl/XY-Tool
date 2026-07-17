@@ -138,10 +138,13 @@ export class ImWebSocketService implements OnModuleDestroy {
   stopPaymentListener(accountKey: string): void {
     const conn = this.connections.get(accountKey);
     if (!conn) return;
+    const wasLive = conn.ws?.readyState === WebSocket.OPEN;
     conn.stopped = true;
     this.closeConnection(conn);
     this.connections.delete(accountKey);
-    this.logger.log(`[${accountKey}] WS 付款监听已停止`);
+    if (wasLive) {
+      this.logger.log(`[${accountKey}] WS 付款监听已停止`);
+    }
   }
 
   isListenerActive(accountKey: string): boolean {

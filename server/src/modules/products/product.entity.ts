@@ -1,4 +1,4 @@
-import { Column, Entity, Index } from 'typeorm';
+﻿import { Column, Entity, Index } from 'typeorm';
 import { BaseEntity } from '../../common/entities/base.entity';
 
 /**
@@ -14,6 +14,10 @@ export type DeliveryType = 'kami' | 'link' | 'text' | 'license';
  * 商品配置表。
  * 把闲鱼商品（itemId）与发货规则关联起来。
  * 一个闲鱼账号下有 N 个商品，每个商品对应一种发货方式。
+ *
+ * 多规格：isMultiSpec=true 时，需同时匹配 itemId + specName/specValue。
+ * 多数量：multiQuantity=true 时，按订单 quantity 连续发送多条卡密/内容。
+ * 延时：delaySeconds>0 时，匹配规则后先等待再发货（风控友好）。
  */
 @Entity('products')
 @Index('idx_tenant_item', ['tenantId', 'itemId'])
@@ -72,6 +76,26 @@ export class ProductEntity extends BaseEntity {
   /** 发货时附带的备注消息（可选，如"如有问题联系客服"） */
   @Column({ type: 'text', nullable: true, name: 'remark', comment: '发货附言' })
   remark: string | null;
+
+  /** 延时发货秒数（0=立即，建议 0~120，过大影响体验） */
+  @Column({ name: 'delay_seconds', type: 'int', default: 0, comment: '延时发货秒数' })
+  delaySeconds: number;
+
+  /** 是否按订单数量连续发送多份卡密/内容 */
+  @Column({ name: 'multi_quantity', type: 'boolean', default: false, comment: '多数量发货' })
+  multiQuantity: boolean;
+
+  /** 是否多规格匹配（开启后需匹配 specName/specValue） */
+  @Column({ name: 'is_multi_spec', type: 'boolean', default: false, comment: '多规格规则' })
+  isMultiSpec: boolean;
+
+  /** 规格名（如 套餐 / 颜色） */
+  @Column({ type: 'varchar', length: 100, name: 'spec_name', nullable: true, comment: '规格名' })
+  specName: string | null;
+
+  /** 规格值（如 月卡 / 红色） */
+  @Column({ type: 'varchar', length: 200, name: 'spec_value', nullable: true, comment: '规格值' })
+  specValue: string | null;
 
   @Column({ name: 'enabled', type: 'boolean', default: true, comment: '是否启用自动发货' })
   enabled: boolean;
