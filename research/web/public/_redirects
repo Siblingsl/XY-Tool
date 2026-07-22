@@ -1,4 +1,4 @@
 # Cloudflare Pages：仅做 SPA 兜底。
 # /api 不要在此反代——CF Pages 的 _redirects 不能可靠代理到外部源；
-# 生产由 VITE_API_BASE_URL 直连 https://xy-api.skyed.dpdns.org/api。
+# 生产由 VITE_API_BASE_URL 直连 https://research-api.skyed.dpdns.org/api。
 /*  /index.html  200

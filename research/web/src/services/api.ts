@@ -1,8 +1,8 @@
 /**
  * 研究系统 API 服务层。
  * - 开发：默认 /api（Vite 代理到本地后端）
- * - 生产：构建时注入 VITE_API_BASE_URL（如 https://xy-api.skyed.dpdns.org/api）
- *   浏览器直连 API；CF Pages 的 _redirects 无法可靠反代外部源。
+ * - 生产：构建时注入 VITE_API_BASE_URL（如 https://research-api.skyed.dpdns.org/api）
+ *   浏览器直连海外 Go API；CF Pages 的 _redirects 无法可靠反代外部源。
  */
 
 const API_ROOT =

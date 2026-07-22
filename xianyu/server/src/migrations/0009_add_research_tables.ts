@@ -1,11 +1,9 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 /**
- * 项目研究系统全部数据表。
- * 文档第五章：research_gmail_accounts, research_emails, research_projects,
- * research_evidences, research_competitors, research_heat_points,
- * research_clusters, research_daily_reports, research_pipeline_jobs。
- * 研究域使用 uuid 主键，与闲鱼域 bigint 自增隔离。
+ * 【遗留】曾把研究表建在闲鱼库；研究系统已拆到海外 Go + 独立库。
+ * 保留本迁移以免已上线环境的 typeorm_migrations 历史断裂。
+ * 新环境也会建出 research_* 空表（IF NOT EXISTS），可忽略，不影响闲鱼业务。
  */
 export class AddResearchTables1700000009000 implements MigrationInterface {
   name = 'AddResearchTables1700000009000';

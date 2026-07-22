@@ -18,18 +18,6 @@ import {
   LicenseCodeEntity,
 } from './modules/license/entities/license.entities';
 import { AiConfigEntity } from './modules/ai/ai-config.entity';
-import {
-  ResearchGmailAccountEntity,
-  ResearchEmailEntity,
-  ResearchProjectEntity,
-  ResearchEvidenceEntity,
-  ResearchCompetitorEntity,
-  ResearchHeatPointEntity,
-  ResearchClusterEntity,
-  ResearchDailyReportEntity,
-  ResearchPipelineJobEntity,
-  ResearchSettingsEntity,
-} from './modules/research/entities';
 
 /**
  * TypeORM DataSource 独立实例。
@@ -69,17 +57,6 @@ export const AppDataSource = new DataSource({
     LicenseBatchEntity,
     LicenseCodeEntity,
     AiConfigEntity,
-    // 研究域实体
-    ResearchGmailAccountEntity,
-    ResearchEmailEntity,
-    ResearchProjectEntity,
-    ResearchEvidenceEntity,
-    ResearchCompetitorEntity,
-    ResearchHeatPointEntity,
-    ResearchClusterEntity,
-    ResearchDailyReportEntity,
-    ResearchPipelineJobEntity,
-    ResearchSettingsEntity,
   ],
   migrations: [__dirname + '/migrations/*.{ts,js}'],
   migrationsTableName: 'typeorm_migrations',
