@@ -20,7 +20,7 @@ export default function Login() {
         'research_user',
         JSON.stringify({ username: values.username, nickname: values.username }),
       );
-      message.success('登录成功');
+      message.success('登录成功啦啦啦啦啦啦啦啦啦啦啦阿联');
       navigate('/dashboard', { replace: true });
     } catch (err: any) {
       message.error(err.message || '登录失败');
