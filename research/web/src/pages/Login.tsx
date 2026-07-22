@@ -91,18 +91,37 @@ export default function Login() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background:
-          'radial-gradient(circle at 20% 20%, #ccfbf1 0%, transparent 40%), radial-gradient(circle at 80% 0%, #99f6e4 0%, transparent 35%), linear-gradient(160deg, #134e4a 0%, #0f766e 45%, #115e59 100%)',
+        background: '#F1F5F9',
         padding: 24,
       }}
     >
-      <Card style={{ width: 400, boxShadow: '0 12px 40px rgba(0,0,0,0.18)' }}>
+      <Card
+        style={{
+          width: 400,
+          borderRadius: 12,
+          border: '1px solid #E2E8F0',
+          boxShadow: '0 4px 24px rgba(0, 0, 0, 0.06)',
+        }}
+      >
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <ExperimentOutlined style={{ fontSize: 36, color: '#0f766e' }} />
-          <Typography.Title level={3} style={{ marginTop: 12, marginBottom: 4 }}>
+          <div
+            style={{
+              width: 52,
+              height: 52,
+              borderRadius: 12,
+              background: '#4F46E5',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 12,
+            }}
+          >
+            <ExperimentOutlined style={{ fontSize: 24, color: '#fff' }} />
+          </div>
+          <Typography.Title level={4} style={{ marginTop: 0, marginBottom: 4, color: '#0F172A' }}>
             项目研究系统
           </Typography.Title>
-          <Typography.Text type="secondary">
+          <Typography.Text style={{ color: '#64748B' }}>
             从邮件中发现投资/副业/SaaS 机会
           </Typography.Text>
         </div>
@@ -137,7 +156,7 @@ export default function Login() {
             <Button
               type="link"
               block
-              style={{ marginTop: 4, color: '#888' }}
+              style={{ marginTop: 4, color: '#64748B' }}
               onClick={() => {
                 setShowRegister(false);
                 registerForm.resetFields();

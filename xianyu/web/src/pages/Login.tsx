@@ -180,17 +180,14 @@ export default function Login() {
 
   return (
     <div style={styles.bgWrap}>
-      {/* 动态渐变背景层 */}
-      <div style={styles.animatedBg} />
-
       <div style={styles.centerWrap}>
         <div style={styles.card}>
           {/* Logo 区 */}
           <div style={styles.logoWrap}>
             <div style={styles.logoIcon}>
-              <ShopOutlined style={{ fontSize: 30, color: "#fff" }} />
+              <ShopOutlined style={{ fontSize: 24, color: "#fff" }} />
             </div>
-            <Typography.Title level={3} style={styles.title}>
+            <Typography.Title level={4} style={styles.title}>
               闲鱼自动发货
             </Typography.Title>
             <Typography.Text style={styles.subtitle}>
@@ -206,7 +203,7 @@ export default function Login() {
                 <Button
                   type="link"
                   block
-                  style={{ marginTop: 4, color: "#888" }}
+                  style={{ marginTop: 4, color: "#64748B" }}
                   onClick={() => {
                     setShowRegister(false);
                     registerForm.resetFields();
@@ -246,15 +243,7 @@ const styles: Record<string, React.CSSProperties> = {
     position: "relative",
     minHeight: "100vh",
     overflow: "hidden",
-  },
-  animatedBg: {
-    position: "absolute",
-    inset: 0,
-    background:
-      "linear-gradient(-45deg, #667eea, #764ba2, #6B8DD6, #8E37D7)",
-    backgroundSize: "400% 400%",
-    animation: "loginBgGradient 15s ease infinite",
-    zIndex: 0,
+    background: "#F1F5F9",
   },
   centerWrap: {
     position: "relative",
@@ -267,15 +256,13 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "24px",
   },
   card: {
-    width: 420,
+    width: 400,
     maxWidth: "100%",
     padding: "40px 36px 32px",
-    borderRadius: 20,
-    background: "rgba(255, 255, 255, 0.92)",
-    backdropFilter: "blur(20px)",
-    WebkitBackdropFilter: "blur(20px)",
-    boxShadow: "0 20px 60px rgba(0, 0, 0, 0.25)",
-    border: "1px solid rgba(255, 255, 255, 0.4)",
+    borderRadius: 12,
+    background: "#ffffff",
+    boxShadow: "0 4px 24px rgba(0, 0, 0, 0.06)",
+    border: "1px solid #E2E8F0",
   },
   logoWrap: {
     display: "flex",
@@ -284,28 +271,27 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
   },
   logoIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
-    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    background: "#4F46E5",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    boxShadow: "0 8px 24px rgba(102, 126, 234, 0.4)",
     marginBottom: 4,
   },
   title: {
     margin: 0,
-    color: "#1a1a2e",
+    color: "#0F172A",
     fontWeight: 600,
   },
   subtitle: {
-    color: "#888",
+    color: "#64748B",
     fontSize: 13,
   },
   copyright: {
     marginTop: 20,
-    color: "rgba(255,255,255,0.7)",
+    color: "#94A3B8",
     fontSize: 12,
   },
   // 彩蛋按钮：完全透明，不可见但可点击，位于左下角
@@ -323,17 +309,3 @@ const styles: Record<string, React.CSSProperties> = {
     outline: "none",
   },
 } as const;
-
-// 动画 keyframes（注入到 document）
-if (typeof document !== "undefined" && !document.getElementById("login-bg-anim")) {
-  const style = document.createElement("style");
-  style.id = "login-bg-anim";
-  style.textContent = `
-    @keyframes loginBgGradient {
-      0%   { background-position: 0% 50%; }
-      50%  { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
-    }
-  `;
-  document.head.appendChild(style);
-}

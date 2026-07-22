@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Badge, Layout, Menu, theme, Avatar, Space, Typography, Tooltip, Select } from 'antd';
+import { Badge, Layout, Menu, Avatar, Space, Typography, Tooltip, Select } from 'antd';
 import {
   DashboardOutlined,
   UserOutlined,
@@ -7,7 +7,6 @@ import {
   KeyOutlined,
   OrderedListOutlined,
   LogoutOutlined,
-  WifiOutlined,
   SettingOutlined,
   MessageOutlined,
   SafetyCertificateOutlined,
@@ -40,9 +39,6 @@ export default function MainLayout() {
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
   const [wsStatus, setWsStatus] = useState<WsStatus>(wsClient.status);
-  const {
-    token: { colorBgContainer },
-  } = theme.useToken();
 
   const user = JSON.parse(localStorage.getItem('user') || 'null');
 
@@ -115,41 +111,82 @@ export default function MainLayout() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider collapsible collapsed={collapsed} onCollapse={setCollapsed}>
+      <Sider
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        theme="light"
+        width={240}
+        style={{
+          borderRight: '1px solid #E2E8F0',
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          zIndex: 100,
+        }}
+      >
         <div
           style={{
-            height: 48,
-            margin: 12,
-            color: '#fff',
-            textAlign: 'center',
-            lineHeight: '48px',
-            fontWeight: 600,
-            fontSize: 16,
+            height: 56,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+            borderBottom: '1px solid #F1F5F9',
           }}
         >
-          {collapsed ? '闲' : '闲鱼自动发货'}
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: '#4F46E5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontSize: 15,
+              fontWeight: 700,
+              flexShrink: 0,
+            }}
+          >
+            闲
+          </div>
+          {!collapsed && (
+            <span style={{ fontSize: 15, fontWeight: 600, color: '#0F172A' }}>
+              闲鱼自动发货
+            </span>
+          )}
         </div>
         <Menu
-          theme="dark"
           mode="inline"
+          theme="light"
           selectedKeys={[location.pathname]}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
+          style={{ border: 'none', padding: '8px 12px' }}
         />
       </Sider>
-      <Layout>
+      <Layout style={{ marginLeft: collapsed ? 80 : 240, transition: 'margin-left 0.2s' }}>
         <Header
           style={{
             padding: '0 24px',
-            background: colorBgContainer,
+            background: '#fff',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             gap: 16,
+            height: 56,
+            lineHeight: '56px',
+            borderBottom: '1px solid #E2E8F0',
+            position: 'sticky',
+            top: 0,
+            zIndex: 99,
           }}
         >
           <Space>
-            <AppstoreOutlined style={{ color: '#1677ff' }} />
+            <AppstoreOutlined style={{ color: '#4F46E5' }} />
             <Select
               value="xianyu"
               options={SYSTEM_OPTIONS}
@@ -161,34 +198,28 @@ export default function MainLayout() {
           </Space>
           <Space size="middle">
             <Tooltip title={statusMeta[wsStatus].text}>
-              <Badge
-                status={wsStatus === 'connected' ? 'success' : wsStatus === 'connecting' ? 'processing' : 'error'}
-              />
-              <WifiOutlined style={{ color: statusMeta[wsStatus].color }} />
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {statusMeta[wsStatus].text}
-              </Typography.Text>
+              <Space size={4}>
+                <Badge
+                  status={wsStatus === 'connected' ? 'success' : wsStatus === 'connecting' ? 'processing' : 'error'}
+                />
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {statusMeta[wsStatus].text}
+                </Typography.Text>
+              </Space>
             </Tooltip>
             <Space>
-              <Avatar icon={<UserOutlined />} />
-              <Typography.Text>{user?.nickname || user?.username}</Typography.Text>
-              <Typography.Link onClick={handleLogout}>
+              <Avatar size={28} style={{ background: '#4F46E5' }} icon={<UserOutlined />} />
+              <Typography.Text style={{ color: '#334155' }}>
+                {user?.nickname || user?.username}
+              </Typography.Text>
+              <Typography.Link onClick={handleLogout} style={{ color: '#64748B', fontSize: 13 }}>
                 <LogoutOutlined /> 退出
               </Typography.Link>
             </Space>
           </Space>
         </Header>
-        <Content style={{ margin: 16 }}>
-          <div
-            style={{
-              padding: 24,
-              minHeight: 360,
-              background: colorBgContainer,
-              borderRadius: 8,
-            }}
-          >
-            <Outlet />
-          </div>
+        <Content style={{ padding: 24, minHeight: 360 }}>
+          <Outlet />
         </Content>
       </Layout>
     </Layout>

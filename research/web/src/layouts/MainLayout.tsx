@@ -5,7 +5,6 @@ import {
   Menu,
   Select,
   Space,
-  theme,
   Typography,
   message,
 } from 'antd';
@@ -46,9 +45,6 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
-  const {
-    token: { colorBgContainer },
-  } = theme.useToken();
 
   const user = JSON.parse(localStorage.getItem('research_user') || 'null');
 
@@ -93,44 +89,78 @@ export default function MainLayout() {
         collapsible
         collapsed={collapsed}
         onCollapse={setCollapsed}
-        style={{ background: '#134e4a' }}
-        theme="dark"
+        theme="light"
+        width={240}
+        style={{
+          borderRight: '1px solid #E2E8F0',
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          zIndex: 100,
+        }}
       >
         <div
           style={{
-            height: 48,
-            margin: 12,
-            color: '#fff',
-            textAlign: 'center',
-            lineHeight: '48px',
-            fontWeight: 600,
-            fontSize: 16,
+            height: 56,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+            borderBottom: '1px solid #F1F5F9',
           }}
         >
-          {collapsed ? '研' : '项目研究'}
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              background: '#4F46E5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontSize: 15,
+              fontWeight: 700,
+              flexShrink: 0,
+            }}
+          >
+            研
+          </div>
+          {!collapsed && (
+            <span style={{ fontSize: 15, fontWeight: 600, color: '#0F172A' }}>
+              项目研究
+            </span>
+          )}
         </div>
         <Menu
-          theme="dark"
           mode="inline"
+          theme="light"
           selectedKeys={[selectedKey]}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
-          style={{ background: '#134e4a' }}
+          style={{ border: 'none', padding: '8px 12px' }}
         />
       </Sider>
-      <Layout>
+      <Layout style={{ marginLeft: collapsed ? 80 : 240, transition: 'margin-left 0.2s' }}>
         <Header
           style={{
             padding: '0 24px',
-            background: colorBgContainer,
+            background: '#fff',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             gap: 16,
+            height: 56,
+            lineHeight: '56px',
+            borderBottom: '1px solid #E2E8F0',
+            position: 'sticky',
+            top: 0,
+            zIndex: 99,
           }}
         >
           <Space>
-            <AppstoreOutlined style={{ color: '#0f766e' }} />
+            <AppstoreOutlined style={{ color: '#4F46E5' }} />
             <Select
               value="research"
               options={SYSTEM_OPTIONS}
@@ -141,29 +171,17 @@ export default function MainLayout() {
             />
           </Space>
           <Space>
-            <Avatar
-              style={{ background: '#0f766e' }}
-              icon={<UserOutlined />}
-            />
-            <Typography.Text>
+            <Avatar size={28} style={{ background: '#4F46E5' }} icon={<UserOutlined />} />
+            <Typography.Text style={{ color: '#334155' }}>
               {user?.nickname || user?.username || 'demo'}
             </Typography.Text>
-            <Typography.Link onClick={handleLogout}>
+            <Typography.Link onClick={handleLogout} style={{ color: '#64748B', fontSize: 13 }}>
               <LogoutOutlined /> 退出
             </Typography.Link>
           </Space>
         </Header>
-        <Content style={{ margin: 16 }}>
-          <div
-            style={{
-              padding: 24,
-              minHeight: 360,
-              background: colorBgContainer,
-              borderRadius: 8,
-            }}
-          >
-            <Outlet />
-          </div>
+        <Content style={{ padding: 24, minHeight: 360 }}>
+          <Outlet />
         </Content>
       </Layout>
     </Layout>
