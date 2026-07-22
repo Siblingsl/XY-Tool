@@ -3,6 +3,9 @@
 # 用法：
 #   cp .env.example .env   # 填写密钥与域名
 #   docker compose up -d
+#
+# 使用固定子网 IP，避免部分 VPS 上 Docker 内嵌 DNS / 127.0.0.53 异常
+# 导致 api 无法解析服务名 postgres。
 # ============================================================
 
 services:
@@ -17,7 +20,6 @@ services:
       TZ: UTC
     volumes:
       - research-pg-data:/var/lib/postgresql/data
-    # 小机：限制连接与共享内存（可按机器调大）
     command:
       - postgres
       - -c
@@ -29,9 +31,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    # 生产可不暴露端口；本地调试可取消注释
-    # ports:
-    #   - "5434:5432"
+    networks:
+      research:
+        ipv4_address: 172.30.0.2
 
   api:
     image: ${RESEARCH_IMAGE:-ghcr.io/siblingsl/xy-tool-research-api:latest}
@@ -43,7 +45,8 @@ services:
     env_file:
       - .env
     environment:
-      DB_HOST: postgres
+      # 固定 IP，不依赖 Docker 服务名 DNS
+      DB_HOST: 172.30.0.2
       DB_PORT: "5432"
       DB_USER: ${DB_USER:-research}
       DB_PASSWORD: ${DB_PASSWORD}
@@ -51,10 +54,20 @@ services:
       DB_SSLMODE: disable
       PORT: "8080"
     ports:
-      - "${API_HOST_PORT:-8080}:8080"
+      - "${API_HOST_PORT:-46189}:8080"
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      research:
+        ipv4_address: 172.30.0.3
+
+networks:
+  research:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
 
 volumes:
   research-pg-data:

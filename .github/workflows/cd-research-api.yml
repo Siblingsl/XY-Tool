@@ -126,8 +126,9 @@ jobs:
             chmod +x deploy.sh
             # 海外一般可直接 pull GHCR
             docker compose --env-file .env pull api
-            docker compose --env-file .env up -d --remove-orphans
+            docker compose --env-file .env up -d --remove-orphans --force-recreate
             sleep 3
-            curl -sf "http://127.0.0.1:${API_HOST_PORT:-8080}/api/research/health" || \
-              curl -sf "http://127.0.0.1:8080/api/research/health"
+            HOST_PORT=$(grep -E '^API_HOST_PORT=' .env | cut -d= -f2 | tr -d '"' | tr -d "'")
+            HOST_PORT=${HOST_PORT:-46189}
+            curl -sf "http://127.0.0.1:${HOST_PORT}/api/research/health"
             echo "deployed ${IMAGE}"
