@@ -7,6 +7,8 @@
 # GitHub Variables：
 #   ENABLE_CF_DEPLOY=true
 #   RESEARCH_API_BASE_URL=https://research-api.example.com/api
+#   XY_WEB_URL=https://xy.skyed.dpdns.org          # 顶栏跳转闲鱼前端
+#   RESEARCH_WEB_URL=https://emailanalysis.skyed.dpdns.org  # 闲鱼 CD 用
 # ============================================================
 
 name: CD · Research
@@ -62,9 +64,13 @@ jobs:
         working-directory: research/web
         env:
           VITE_API_BASE_URL: ${{ vars.RESEARCH_API_BASE_URL || vars.VITE_API_BASE_URL }}
+          # 顶栏「闲鱼自动发货系统」跳转目标（本地默认见 .env.example）
+          VITE_SISTER_APP_URL: ${{ vars.XY_WEB_URL }}
         run: |
           export VITE_API_BASE_URL="${VITE_API_BASE_URL:-https://research-api.skyed.dpdns.org/api}"
+          export VITE_SISTER_APP_URL="${VITE_SISTER_APP_URL:-https://xy.skyed.dpdns.org}"
           echo "VITE_API_BASE_URL=$VITE_API_BASE_URL"
+          echo "VITE_SISTER_APP_URL=$VITE_SISTER_APP_URL"
           npm ci && npm run build
 
       - name: Deploy to Cloudflare Pages

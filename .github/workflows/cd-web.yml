@@ -1,6 +1,9 @@
 # ============================================================
 # CD · Web（闲鱼前端）
 # 触发：push main/master 且改动了 xianyu/web/** 。
+#
+# GitHub Variables（可选）：
+#   RESEARCH_WEB_URL=https://emailanalysis.skyed.dpdns.org  # 顶栏跳转研究前端
 # ============================================================
 
 name: CD · Web
@@ -70,7 +73,12 @@ jobs:
         working-directory: xianyu/web
         env:
           VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
-        run: npm ci && npm run build
+          # 顶栏「项目研究系统」跳转目标（本地默认见 .env.example）
+          VITE_SISTER_APP_URL: ${{ vars.RESEARCH_WEB_URL }}
+        run: |
+          export VITE_SISTER_APP_URL="${VITE_SISTER_APP_URL:-https://emailanalysis.skyed.dpdns.org}"
+          echo "VITE_SISTER_APP_URL=$VITE_SISTER_APP_URL"
+          npm ci && npm run build
 
       - name: Deploy to Cloudflare Pages
         working-directory: xianyu/web

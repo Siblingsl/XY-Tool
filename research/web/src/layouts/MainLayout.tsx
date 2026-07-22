@@ -71,6 +71,7 @@ export default function MainLayout() {
   const handleSystemSwitch = (value: string) => {
     if (value === 'xianyu') {
       const url = new URL(SISTER_APP_URL);
+      url.pathname = '/dashboard';
       url.searchParams.set('from', 'switch');
       window.location.href = url.toString();
     }

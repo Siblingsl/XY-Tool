@@ -94,6 +94,7 @@ export default function MainLayout() {
   const handleSystemSwitch = (value: string) => {
     if (value === 'research') {
       const url = new URL(SISTER_APP_URL);
+      url.pathname = '/dashboard';
       url.searchParams.set('from', 'switch');
       window.location.href = url.toString();
     }

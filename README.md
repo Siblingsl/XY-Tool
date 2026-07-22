@@ -179,8 +179,9 @@ npm run dev                  # 监听 :5174，/api 代理到 :8080
 
 | 环境变量 | 包 | 说明 |
 |----------|-----|------|
-| `VITE_SISTER_APP_URL` | `xianyu/web` | 跳转到研究系统，默认 `http://localhost:5174` |
-| `VITE_SISTER_APP_URL` | `research/web` | 跳转到闲鱼控制台，默认 `http://localhost:5173` |
+| `VITE_SISTER_APP_URL` | `xianyu/web` | 本地默认 `http://localhost:5174`；生产由 CD 注入 `RESEARCH_WEB_URL` |
+| `VITE_SISTER_APP_URL` | `research/web` | 本地默认 `http://localhost:5173`；生产由 CD 注入 `XY_WEB_URL` |
+| `RESEARCH_WEB_URL` / `XY_WEB_URL` | GitHub Variables | 两边前端互相跳转的线上域名 |
 | `VITE_API_BASE_URL` / `RESEARCH_API_BASE_URL` | 研究前端 CD | 生产指向海外 Go API，如 `https://research-api.xxx/api` |
 
 ## 生产部署（CI/CD）
