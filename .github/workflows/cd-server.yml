@@ -105,6 +105,8 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          # 默认约 10m；国内机拉 GHCR 镜像常超过该时间
+          command_timeout: 60m
           script: |
             cd ${{ vars.DEPLOY_DIR || '/opt/xianyu-tool' }}
             chmod +x scripts/deploy.sh
