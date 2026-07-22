@@ -1,15 +1,11 @@
 # Dependencies
 node_modules/
-server/node_modules/
-web/node_modules/
-web-research/node_modules/
+**/node_modules/
 
 # Build output
 dist/
 build/
-server/dist/
-web/dist/
-web-research/dist/
+**/dist/
 
 # Environment
 .env
@@ -17,8 +13,7 @@ web-research/dist/
 .env.*.local
 .env.prod
 .env.prod.local
-server/.env
-web/.env
+**/.env
 
 # Logs
 logs/
@@ -54,4 +49,17 @@ redis-data/
 *.pem
 *.key
 secrets/
+
+# Leftover dirs from path migration (locked by IDE/dev servers)
+/server/
+/web/
+/web-research/
+
+# Go build artifacts
+research/server/bin/
+
+# Wrangler / Vite cache
+**/.wrangler/
+**/.vite/
+
 Reference_Projects/

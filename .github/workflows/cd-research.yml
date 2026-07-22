@@ -1,13 +1,12 @@
 # ============================================================
-# CD · Research（邮件分析前端）
-# 触发：push main/master 且改动了 web-research/** 。
-# 流程：构建 Vite → 部署到 Cloudflare Pages（项目 email-analysis）。
-# 浏览器直连后端（VITE_API_BASE_URL），与闲鱼前端同一套 API 域名。
+# CD · Research Web（邮件分析前端 → Cloudflare Pages）
+# 触发：push main/master 且改动了 research/web/** 。
+# API 指向海外 Go 后端：RESEARCH_API_BASE_URL（或 VITE_RESEARCH_API_BASE_URL）
 #
 # GitHub Secrets：CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
 # GitHub Variables：
 #   ENABLE_CF_DEPLOY=true
-#   VITE_API_BASE_URL=https://xy-api.skyed.dpdns.org/api  （与 cd-web 共用）
+#   RESEARCH_API_BASE_URL=https://research-api.example.com/api
 # ============================================================
 
 name: CD · Research
@@ -16,7 +15,7 @@ on:
   push:
     branches: [main, master]
     paths:
-      - 'web-research/**'
+      - 'research/web/**'
       - '.github/workflows/cd-research.yml'
   workflow_dispatch:
     inputs:
@@ -45,11 +44,11 @@ jobs:
       - name: Validate Cloudflare secrets
         run: |
           if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
-            echo "::error::未配置 CLOUDFLARE_API_TOKEN。请到 GitHub → Settings → Secrets → Actions → Repository secrets 添加"
+            echo "::error::未配置 CLOUDFLARE_API_TOKEN"
             exit 1
           fi
           if [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
-            echo "::error::未配置 CLOUDFLARE_ACCOUNT_ID。请到 GitHub → Settings → Secrets → Actions → Repository secrets 添加"
+            echo "::error::未配置 CLOUDFLARE_ACCOUNT_ID"
             exit 1
           fi
 
@@ -57,25 +56,24 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: web-research/package-lock.json
+          cache-dependency-path: research/web/package-lock.json
 
-      - name: Build web-research
-        working-directory: web-research
+      - name: Build research web
+        working-directory: research/web
         env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_API_BASE_URL: ${{ vars.RESEARCH_API_BASE_URL || vars.VITE_API_BASE_URL }}
         run: |
-          export VITE_API_BASE_URL="${VITE_API_BASE_URL:-https://xy-api.skyed.dpdns.org/api}"
+          export VITE_API_BASE_URL="${VITE_API_BASE_URL:-https://research-api.skyed.dpdns.org/api}"
           echo "VITE_API_BASE_URL=$VITE_API_BASE_URL"
           npm ci && npm run build
 
       - name: Deploy to Cloudflare Pages
-        working-directory: web-research
+        working-directory: research/web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           PROJECT="email-analysis"
-          # 首次部署时自动创建 Pages 项目（已存在则忽略）
           npx wrangler@3 pages project create "$PROJECT" --production-branch=main 2>/dev/null || true
           npx wrangler@3 pages deploy dist \
             --project-name="$PROJECT" \
@@ -83,7 +81,5 @@ jobs:
 
       - name: Summary
         run: |
-          echo "::notice::邮件分析前端已部署到 Cloudflare Pages 项目：email-analysis"
-          echo "自定义域名：https://emailanalysis.skyed.dpdns.org"
-          echo "API：${{ vars.VITE_API_BASE_URL || 'https://xy-api.skyed.dpdns.org/api' }}"
-          echo "请确认服务器 .env.prod 的 CORS_ORIGIN 包含 https://emailanalysis.skyed.dpdns.org（多个源用逗号分隔）"
+          echo "::notice::邮件分析前端已部署：email-analysis"
+          echo "请配置 RESEARCH_API_BASE_URL 指向海外 Go API"

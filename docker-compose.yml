@@ -47,7 +47,7 @@ services:
   # 开发模式：通过命令 npm run start:dev 启动，挂载源码热重载
   server:
     build:
-      context: ./server
+      context: ./xianyu/server
       dockerfile: Dockerfile
     container_name: xianyu-server
     restart: unless-stopped
@@ -59,7 +59,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./server:/app
+      - ./xianyu/server:/app
       - /app/node_modules
     depends_on:
       postgres:
@@ -71,14 +71,14 @@ services:
   # ---------- 前端 Web 控制台 ----------
   web:
     build:
-      context: ./web
+      context: ./xianyu/web
       dockerfile: Dockerfile
     container_name: xianyu-web
     restart: unless-stopped
     ports:
       - "5173:5173"
     volumes:
-      - ./web:/app
+      - ./xianyu/web:/app
       - /app/node_modules
     depends_on:
       - server

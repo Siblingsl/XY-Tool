@@ -1,4 +1,17 @@
-# 闲鱼虚拟产品自动发货工具
+# 闲鱼虚拟产品自动发货工具 + 邮件分析（项目研究）系统
+
+> 本仓库包含两个独立产品，目录已按产品拆分。
+
+| 产品 | 目录 | 后端 | 部署 |
+|------|------|------|------|
+| 闲鱼自动发货 | `xianyu/server` · `xianyu/web` | NestJS（国内机） | `cd-server` / `cd-web` |
+| 邮件分析 / 项目研究 | `research/server` · `research/web` | **Go + Gin（海外机，直连 Google）** | `cd-research-api` / `cd-research` |
+
+研究系统规格见 [`docs/project-research-system.md`](docs/project-research-system.md)。
+
+---
+
+## 闲鱼自动发货
 
 > 基于 mtop 协议逆向的闲鱼虚拟商品（卡密/链接/文本）云端自动发货 SaaS 工具。
 
@@ -60,7 +73,8 @@
 | 缓存 | Redis 7 (预留) |
 | 认证 | Passport + JWT |
 | 加密 | AES-256-GCM (scrypt 密钥派生) |
-| 前端 | React 18 + Vite + Ant Design 5（闲鱼 `web/` :5173；项目研究 `web-research/` :5174） |
+| 前端 | React 18 + Vite + Ant Design 5（闲鱼 `xianyu/web` :5173；研究 `research/web` :5174） |
+| 研究后端 | Go + Gin + GORM + Postgres（`research/server`，默认 :8080） |
 | 部署 | Docker Compose |
 
 ## 快速开始
@@ -135,30 +149,39 @@ docker compose up -d
 # 1. 先启动 PostgreSQL + Redis
 docker compose up -d postgres redis
 
-# 2. 启动后端
-cd server
-# 可选：如需为后端单独覆盖配置，再复制并修改 server/.env
-# cp ../.env .env
+# 2. 启动闲鱼后端
+cd xianyu/server
 npm install
 npm run start:dev        # 监听 :3000
 
 # 3. 启动闲鱼前端（新终端）
-cd web
+cd xianyu/web
 cp .env.example .env.local   # 可选：配置 VITE_SISTER_APP_URL
 npm install
 npm run dev                  # 监听 :5173
 
-# 4. 启动项目研究前端（再开终端）
-cd web-research
-cp .env.example .env.local   # 可选：配置切回闲鱼的 URL
+# 4. 启动研究系统（海外能力本地也可跑）
+# 4a. Postgres（可用 research/deploy 或本机）
+cd research/deploy && cp .env.example .env   # 改 DB_PASSWORD 等
+# 仅起库：docker compose up -d postgres
+
+# 4b. Go API
+cd research/server
+cp .env.example .env         # DATABASE_* / JWT_*
+go run ./cmd/api             # 监听 :8080
+
+# 4c. 研究前端
+cd research/web
+cp .env.example .env.local
 npm install
-npm run dev                  # 监听 :5174
+npm run dev                  # 监听 :5174，/api 代理到 :8080
 ```
 
 | 环境变量 | 包 | 说明 |
 |----------|-----|------|
-| `VITE_SISTER_APP_URL` | `web` | 跳转到项目研究系统，默认 `http://localhost:5174` |
-| `VITE_SISTER_APP_URL` | `web-research` | 跳转到闲鱼控制台，默认 `http://localhost:5173` |
+| `VITE_SISTER_APP_URL` | `xianyu/web` | 跳转到研究系统，默认 `http://localhost:5174` |
+| `VITE_SISTER_APP_URL` | `research/web` | 跳转到闲鱼控制台，默认 `http://localhost:5173` |
+| `VITE_API_BASE_URL` / `RESEARCH_API_BASE_URL` | 研究前端 CD | 生产指向海外 Go API，如 `https://research-api.xxx/api` |
 
 ## 生产部署（CI/CD）
 
@@ -470,46 +493,28 @@ SIGN_PROVIDER=native
 ## 项目结构
 
 ```
-Tool/
-├── docker-compose.yml          # 容器编排
-├── .env.example                 # 环境变量模板
-├── .env                         # 实际配置（不入 Git）
-│
-├── server/                      # 后端 (NestJS)
-│   ├── src/
-│   │   ├── main.ts              # 入口
-│   │   ├── app.module.ts        # 根模块
-│   │   ├── config/              # 配置管理
-│   │   ├── common/              # 公共：Entity 基类、Guard、Filter、Interceptor、工具
-│   │   ├── xianyu/              # 闲鱼协议层
-│   │   │   ├── interfaces.ts    # ISignProvider、MtopRequestContext 等
-│   │   │   ├── mtop-client.ts   # mtop HTTP 调用客户端
-│   │   │   ├── xianyu.module.ts # 协议模块（组装签名 Provider + API）
-│   │   │   ├── providers/       # 签名实现：Mock / HTTP / Native
-│   │   │   └── apis/            # 业务 API 封装：订单、消息、发货确认
-│   │   └── modules/             # 业务模块
-│   │       ├── auth/            # 认证（注册/登录/JWT）
-│   │       ├── users/           # 用户管理
-│   │       ├── accounts/        # 闲鱼账号管理
-│   │       ├── products/        # 商品发货规则
-│   │       ├── kami-pool/       # 卡密池
-│   │       ├── orders/          # 订单
-│   │       ├── delivery/        # 发货引擎 + 日志 + 定时调度
-│   │       └── sign/            # 签名服务监控
-│   ├── Dockerfile
-│   ├── package.json
-│   └── tsconfig.json
-│
-└── web/                         # 前端 (React + Vite + AntD)
-    ├── src/
-    │   ├── App.tsx              # 路由
-    │   ├── api/index.ts         # Axios 封装
-    │   ├── layouts/MainLayout.tsx
-    │   └── pages/               # Dashboard / Accounts / Products / KamiPool / Orders
-    ├── Dockerfile
-    ├── package.json
-    └── vite.config.ts
+xy-Tool/
+├── xianyu/                      # 闲鱼自动发货
+│   ├── server/                  # NestJS API
+│   └── web/                     # React 控制台 :5173
+├── research/                    # 邮件分析 / 项目研究
+│   ├── server/                  # Go + Gin API :8080
+│   ├── web/                     # React 前端 :5174
+│   └── deploy/                  # 海外 Docker Compose + deploy.sh
+├── infra/                       # 闲鱼部署脚本 / nginx 反代片段
+├── cf-workers/google-proxy/     # （可选）国内机访问 Google 的备用代理；海外可不部署
+├── docs/
+├── docker-compose.yml           # 闲鱼本地编排
+└── docker-compose.prod.yml      # 闲鱼国内生产编排
 ```
+
+## 研究系统海外部署（摘要）
+
+1. 海外机安装 Docker，目录例如 `/opt/research-api`
+2. 复制 `research/deploy/docker-compose.yml`、`deploy.sh`，按 `.env.example` 建 `.env`
+3. GitHub：`ENABLE_RESEARCH_DEPLOY=true`，Secrets `RESEARCH_SSH_*`，Variable `RESEARCH_DEPLOY_DIR`
+4. Google 控制台回调改为海外 API：`https://<你的研究API域>/api/research/gmail/callback`
+5. Pages 构建变量 `RESEARCH_API_BASE_URL=https://<你的研究API域>/api`
 
 ## 常见问题
 

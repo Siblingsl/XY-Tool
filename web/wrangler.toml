@@ -1,8 +1,0 @@
-# Cloudflare Pages 配置（由 GitHub Actions wrangler pages deploy 使用）
-name = "xy-tool-web"
-compatibility_date = "2024-06-01"
-pages_build_output_dir = "dist"
-
-# 生产 BACKEND_URL 由 CI 从 GitHub Variables 注入，勿提交真实地址
-[vars]
-BACKEND_URL = "http://127.0.0.1:3000"

@@ -1,15 +1,15 @@
-# CI · Research（邮件分析前端）：push main/master 或 PR 且改动 web-research/** 时，执行 install → build。
+# CI · Research（邮件分析前端）：push/PR 改动 research/web/** 时 install → build。
 name: CI · Research
 
 on:
   push:
     branches: [main, master]
     paths:
-      - 'web-research/**'
+      - 'research/web/**'
       - '.github/workflows/ci-research.yml'
   pull_request:
     paths:
-      - 'web-research/**'
+      - 'research/web/**'
 
 concurrency:
   group: ci-research-${{ github.ref }}
@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./web-research
+        working-directory: ./research/web
 
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: web-research/package-lock.json
+          cache-dependency-path: research/web/package-lock.json
 
       - name: Install dependencies
         run: npm ci

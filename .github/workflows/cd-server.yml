@@ -1,14 +1,10 @@
 # ============================================================
-# CD · Server（后端）
-# 触发：push main/master 且改动了 server 相关文件，或打 v* tag。
-# 流程：构建 server 镜像 → 推送 GHCR（备份/回滚）→ 在 Runner 上
-#       docker save 打包 → SCP 到服务器 → docker load → 启动。
-# 说明：国内机直拉 GHCR 极慢，故部署不走 compose pull，改由 CI 传包。
+# CD · Server（闲鱼后端 · 国内机）
+# 触发：push main/master 且改动了 xianyu/server 相关文件，或打 v* tag。
+# 流程：构建镜像 → GHCR → Runner 打包 SCP → 服务器 docker load。
 #
 # GitHub Secrets：SSH_HOST / SSH_USER / SSH_KEY / SSH_PORT
-# GitHub Variables：
-#   ENABLE_DEPLOY=true            开启后端 SSH 部署
-#   DEPLOY_DIR=/opt/xianyu-tool   （可选）
+# GitHub Variables：ENABLE_DEPLOY=true · DEPLOY_DIR=/opt/xianyu-tool
 # ============================================================
 
 name: CD · Server
@@ -18,10 +14,10 @@ on:
     branches: [main, master]
     tags: ['v*']
     paths:
-      - 'server/**'
+      - 'xianyu/server/**'
       - 'docker-compose.prod.yml'
-      - 'scripts/deploy.sh'
-      - 'nginx/**'
+      - 'infra/scripts/deploy.sh'
+      - 'infra/nginx/**'
       - '.github/workflows/cd-server.yml'
   workflow_dispatch:
     inputs:
@@ -39,7 +35,6 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  # ---------- 后端：构建并推送 server 镜像 ----------
   build-server:
     name: Build & Push Server
     runs-on: ubuntu-latest
@@ -75,8 +70,8 @@ jobs:
       - name: Build & push server image
         uses: docker/build-push-action@v6
         with:
-          context: ./server
-          file: ./server/Dockerfile
+          context: ./xianyu/server
+          file: ./xianyu/server/Dockerfile
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ steps.meta.outputs.owner }}/${{ steps.meta.outputs.repo }}-server:latest
@@ -84,7 +79,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ---------- 后端：SCP 镜像包 + SSH 部署 ----------
   deploy-backend:
     name: Deploy Backend to Server
     runs-on: ubuntu-latest
@@ -108,12 +102,16 @@ jobs:
         run: |
           IMAGE_SHA="${{ env.REGISTRY }}/${OWNER}/${REPO}-server:${SHORT_SHA}"
           IMAGE_LATEST="${{ env.REGISTRY }}/${OWNER}/${REPO}-server:latest"
-          echo "Pulling $IMAGE_SHA ..."
           docker pull "$IMAGE_SHA"
           docker tag "$IMAGE_SHA" "$IMAGE_LATEST"
-          echo "Saving compressed image archive..."
           docker save "$IMAGE_SHA" "$IMAGE_LATEST" | gzip -1 > server-image.tar.gz
-          ls -lh server-image.tar.gz
+          # 打成服务器期望的扁平布局（scripts/、nginx/）
+          mkdir -p deploy-bundle/scripts deploy-bundle/nginx
+          mv server-image.tar.gz deploy-bundle/
+          cp docker-compose.prod.yml deploy-bundle/
+          cp infra/scripts/deploy.sh deploy-bundle/scripts/
+          cp infra/nginx/api.conf deploy-bundle/nginx/
+          ls -lh deploy-bundle/server-image.tar.gz
 
       - name: Sync image + deploy files to server
         uses: appleboy/scp-action@v1.0.0
@@ -122,8 +120,9 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          source: "server-image.tar.gz,docker-compose.prod.yml,scripts/deploy.sh,nginx/api.conf"
+          source: "deploy-bundle/*"
           target: ${{ vars.DEPLOY_DIR || '/opt/xianyu-tool' }}
+          strip_components: 1
           overwrite: true
           timeout: 120s
 
@@ -138,7 +137,6 @@ jobs:
           script: |
             set -euo pipefail
             cd ${{ vars.DEPLOY_DIR || '/opt/xianyu-tool' }}
-            echo "Loading image from archive..."
             gunzip -c server-image.tar.gz | docker load
             rm -f server-image.tar.gz
             chmod +x scripts/deploy.sh

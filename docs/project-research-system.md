@@ -1,8 +1,9 @@
 # 项目研究系统 — 功能规格与开发文档
 
-> 本文档供后续实现真实业务逻辑时直接执行。  
-> **本期已交付**：独立前端 UI 原型（`web-research/`，Mock 数据）+ 后端项目区占位（`GET /api/research/health`）+ 闲鱼/研究双端系统切换。  
-> **本期未交付**：Gmail OAuth、真实邮件拉取、联网搜索、Agent 推理、真实评分与报告生成。
+> 本文档供后续完善 Agent 流水线时直接执行。  
+> **当前架构**：前端 `research/web`；后端为独立 **Go/Gin** 服务 `research/server`（海外部署，直连 Google）；与闲鱼 Nest 后端完全分离。  
+> **本期已交付**：Auth、Gmail OAuth/同步、Emails/Projects/Reports/Jobs/Settings 主 API、goroutine 队列、海外 Docker/CI。  
+> **后期完善**：完整五层 Agent、SERP 真搜索、复杂评分策略。
 
 ---
 
@@ -10,10 +11,10 @@
 
 - **产品**：从 Gmail 邮件中发现投资/副业/SaaS 机会，五层 Agent 流水线验证真实性并评估「我能不能做」，输出每日投资报告。
 - **硬约束**：③ 真伪验证层禁止 AI 编造外部事实；须基于公开可检索来源；营销垃圾邮件自动丢弃。
-- **前端**：`web-research/`（端口 5174），与闲鱼 `web/`（5173）独立；顶栏系统切换真跳转。
-- **后端**：共用 NestJS，研究域 API 前缀一律 `/api/research/*`，与闲鱼业务表/模块隔离。
-- **鉴权**：共用 `/api/auth`；本期原型各自 localStorage；后期建议同域 cookie / SSO。
-- **P0**：Gmail 同步 → 营销过滤 → 项目识别 → 证据型验证（可先接 3～5 个源）→ 落地评分 → 日报。
+- **前端**：`research/web/`（端口 5174），与闲鱼 `xianyu/web/`（5173）独立；顶栏系统切换真跳转。
+- **后端**：Go + Gin，`/api/auth` + `/api/research/*`；独立 Postgres；无 Redis。
+- **鉴权**：研究系统自有用户表与 JWT（不与闲鱼共用）。
+- **P0**：Gmail 同步 → 营销过滤 → 项目识别 → 证据型验证 → 落地评分 → 日报（后半段逐步完善）。
 
 ---
 
