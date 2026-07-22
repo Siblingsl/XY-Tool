@@ -1,0 +1,17 @@
+# Google API 反向代理 Worker
+# 部署：在本目录执行 `npx wrangler deploy`
+# 设置访问密钥（可选但推荐）：`npx wrangler secret put PROXY_ACCESS_KEY`
+name = "google-proxy"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# 访问密钥在部署后用 `wrangler secret put PROXY_ACCESS_KEY` 注入，不写明文。
+
+# 绑定自定义域名/路由（把 example.com 换成你的域名）。
+# 方式一：workers.dev 子域（部署后自动得到 google-proxy.<account>.workers.dev，
+#         国内访问可能不稳定，建议用方式二）。
+# 方式二：自定义域名路由（推荐，国内后端访问更稳）：
+# routes = [
+#   { pattern = "gproxy.example.com/*", zone_name = "example.com" }
+# ]
+# 或在 Cloudflare 控制台为 Worker 添加 Custom Domain：gproxy.example.com

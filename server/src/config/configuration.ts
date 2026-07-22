@@ -162,4 +162,34 @@ export default () => ({
     onLowStock: process.env.ALERT_ON_LOW_STOCK !== 'false',
     onStuckOrders: process.env.ALERT_ON_STUCK_ORDERS !== 'false',
   },
+
+  /**
+   * 项目研究系统配置。
+   * Gmail OAuth 凭证 + 搜索适配器 + 日报定时。
+   */
+  research: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID || '',
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+      redirectUri:
+        process.env.GOOGLE_REDIRECT_URI ||
+        'http://localhost:3000/api/research/gmail/callback',
+      /**
+       * Google API 代理 Worker 地址（国内服务器无法直连 Google 时必填）。
+       * 形如 https://gproxy.example.com，留空则直连 Google。
+       */
+      proxyUrl: process.env.GOOGLE_PROXY_URL || '',
+      /** 代理 Worker 的访问密钥（对应 Worker 的 PROXY_ACCESS_KEY，可选） */
+      proxyKey: process.env.GOOGLE_PROXY_KEY || '',
+    },
+    /** 搜索适配器: serp | mock */
+    searchProvider: process.env.SEARCH_PROVIDER || 'mock',
+    serpapiKey: process.env.SERPAPI_KEY || '',
+    /** 日报生成 cron（默认每天 21:00） */
+    reportCron: process.env.RESEARCH_REPORT_CRON || '0 21 * * *',
+    /** 日报时区 */
+    reportTz: process.env.RESEARCH_TZ || 'Asia/Shanghai',
+    /** 研究前端地址（OAuth 回调后重定向） */
+    frontendUrl: process.env.RESEARCH_FRONTEND_URL || 'http://localhost:5174',
+  },
 });

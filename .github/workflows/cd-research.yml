@@ -1,0 +1,82 @@
+# ============================================================
+# CD · Research（邮件分析前端）
+# 触发：push main/master 且改动了 web-research/** 。
+# 流程：构建 Vite → 部署到 Cloudflare Pages（项目 email-analysis）。
+# /api 由 public/_redirects 反代到后端 https://xy-api.skyed.dpdns.org/api，
+# 因此构建无需注入 API 地址，也不涉及跨域 CORS。
+#
+# GitHub Secrets：CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+# GitHub Variables：
+#   ENABLE_CF_DEPLOY=true   开启 CF Pages 部署（与闲鱼前端共用此开关）
+# ============================================================
+
+name: CD · Research
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'web-research/**'
+      - '.github/workflows/cd-research.yml'
+  workflow_dispatch:
+    inputs:
+      skip_deploy:
+        description: '跳过部署'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: cd-research-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-research:
+    name: Deploy Research Frontend to Cloudflare
+    runs-on: ubuntu-latest
+    if: ${{ !(github.event.inputs.skip_deploy == 'true') && vars.ENABLE_CF_DEPLOY == 'true' }}
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Cloudflare secrets
+        run: |
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "::error::未配置 CLOUDFLARE_API_TOKEN。请到 GitHub → Settings → Secrets → Actions → Repository secrets 添加"
+            exit 1
+          fi
+          if [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
+            echo "::error::未配置 CLOUDFLARE_ACCOUNT_ID。请到 GitHub → Settings → Secrets → Actions → Repository secrets 添加"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web-research/package-lock.json
+
+      - name: Build web-research
+        working-directory: web-research
+        run: npm ci && npm run build
+
+      - name: Deploy to Cloudflare Pages
+        working-directory: web-research
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PROJECT="email-analysis"
+          # 首次部署时自动创建 Pages 项目（已存在则忽略）
+          npx wrangler@3 pages project create "$PROJECT" --production-branch=main 2>/dev/null || true
+          npx wrangler@3 pages deploy dist \
+            --project-name="$PROJECT" \
+            --commit-dirty=true
+
+      - name: Summary
+        run: |
+          echo "::notice::邮件分析前端已部署到 Cloudflare Pages 项目：email-analysis"
+          echo "自定义域名：https://emailanalysis.skyed.dpdns.org"

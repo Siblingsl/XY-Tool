@@ -60,7 +60,7 @@
 | 缓存 | Redis 7 (预留) |
 | 认证 | Passport + JWT |
 | 加密 | AES-256-GCM (scrypt 密钥派生) |
-| 前端 | React 18 + Vite + Ant Design 5 |
+| 前端 | React 18 + Vite + Ant Design 5（闲鱼 `web/` :5173；项目研究 `web-research/` :5174） |
 | 部署 | Docker Compose |
 
 ## 快速开始
@@ -120,10 +120,14 @@ docker compose up -d
 
 | 服务 | 地址 |
 |------|------|
-| Web 控制台 | http://localhost:5173 |
+| 闲鱼 Web 控制台 | http://localhost:5173 |
+| 项目研究系统（UI 原型） | http://localhost:5174 |
 | 后端 API | http://localhost:3000 |
 | API 文档 (Swagger) | http://localhost:3000/api/docs |
 | 健康检查 | http://localhost:3000/api/health |
+| 研究域占位 | http://localhost:3000/api/research/health |
+
+顶栏左侧有「管理系统切换」下拉，可在两个前端之间跳转。研究系统功能规格见 [`docs/project-research-system.md`](docs/project-research-system.md)。
 
 ### 5. 本地开发（不使用 Docker）
 
@@ -138,11 +142,23 @@ cd server
 npm install
 npm run start:dev        # 监听 :3000
 
-# 3. 启动前端（新终端）
+# 3. 启动闲鱼前端（新终端）
 cd web
+cp .env.example .env.local   # 可选：配置 VITE_SISTER_APP_URL
 npm install
-npm run dev              # 监听 :5173
+npm run dev                  # 监听 :5173
+
+# 4. 启动项目研究前端（再开终端）
+cd web-research
+cp .env.example .env.local   # 可选：配置切回闲鱼的 URL
+npm install
+npm run dev                  # 监听 :5174
 ```
+
+| 环境变量 | 包 | 说明 |
+|----------|-----|------|
+| `VITE_SISTER_APP_URL` | `web` | 跳转到项目研究系统，默认 `http://localhost:5174` |
+| `VITE_SISTER_APP_URL` | `web-research` | 跳转到闲鱼控制台，默认 `http://localhost:5173` |
 
 ## 生产部署（CI/CD）
 

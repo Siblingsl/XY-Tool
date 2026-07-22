@@ -1,0 +1,100 @@
+# ============================================================
+# CD · Web（闲鱼前端）
+# 触发：push main/master 且改动了 web/** 。
+# 流程：构建 Vite → 部署到 Cloudflare Pages（项目 xy-tool-web）。
+#
+# GitHub Secrets：CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID
+# GitHub Variables：
+#   ENABLE_CF_DEPLOY=true        开启前端 CF Pages 部署
+#   VITE_API_BASE_URL=https://xy-api.skyed.dpdns.org/api  浏览器直连 API（推荐）
+#   BACKEND_URL=...              仅在使用 Pages Functions 反代 /api 时需要（国内机不推荐）
+#   CLOUDFLARE_PAGES_PROJECT_NAME=xy-tool-web
+# ============================================================
+
+name: CD · Web
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'web/**'
+      - '.github/workflows/cd-web.yml'
+  workflow_dispatch:
+    inputs:
+      skip_deploy:
+        description: '跳过部署'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: cd-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-frontend:
+    name: Deploy Web Frontend to Cloudflare
+    runs-on: ubuntu-latest
+    if: ${{ !(github.event.inputs.skip_deploy == 'true') && vars.ENABLE_CF_DEPLOY == 'true' }}
+    permissions:
+      contents: read
+      deployments: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Cloudflare secrets
+        run: |
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ]; then
+            echo "::error::未配置 CLOUDFLARE_API_TOKEN。请到 GitHub → Settings → Secrets → Actions → Repository secrets 添加"
+            exit 1
+          fi
+          if [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" ]; then
+            echo "::error::未配置 CLOUDFLARE_ACCOUNT_ID。请到 GitHub → Settings → Secrets → Actions → Repository secrets 添加"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Inject wrangler config
+        if: ${{ vars.BACKEND_URL != '' }}
+        working-directory: web
+        env:
+          BACKEND: ${{ vars.BACKEND_URL }}
+          ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          sed -i "s|^BACKEND_URL = .*|BACKEND_URL = \"${BACKEND}\"|" wrangler.toml
+          if grep -q '^account_id' wrangler.toml; then
+            sed -i "s|^account_id = .*|account_id = \"${ACCOUNT_ID}\"|" wrangler.toml
+          else
+            echo "account_id = \"${ACCOUNT_ID}\"" >> wrangler.toml
+          fi
+
+      - name: Build web
+        working-directory: web
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+        run: npm ci && npm run build
+
+      - name: Deploy to Cloudflare Pages
+        working-directory: web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          PROJECT="${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME }}"
+          PROJECT="${PROJECT:-xy-tool-web}"
+          # 首次部署时自动创建 Pages 项目（已存在则忽略）
+          npx wrangler@3 pages project create "$PROJECT" --production-branch=main 2>/dev/null || true
+          npx wrangler@3 pages deploy dist \
+            --project-name="$PROJECT" \
+            --commit-dirty=true
+
+      - name: Summary
+        run: |
+          echo "::notice::闲鱼前端已部署到 Cloudflare Pages 项目：${{ vars.CLOUDFLARE_PAGES_PROJECT_NAME || 'xy-tool-web' }}"
+          echo "请在服务器 .env.prod 将 CORS_ORIGIN 设为 CF 域名（如 https://xxx.pages.dev）"

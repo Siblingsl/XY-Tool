@@ -47,8 +47,14 @@ export class UsersService {
       nickname?: string;
     },
   ): Promise<UserEntity> {
+    if (!input.password) {
+      throw new BadRequestException('密码不能为空');
+    }
     const hashed = await bcrypt.hash(input.password, 10);
-    const entity = manager.create(UserEntity, {
+
+    // 使用 insert + update，避免 save() 对 select:false 的 password
+    // 二次持久化时写成 null（违反 NOT NULL）。
+    const insertResult = await manager.insert(UserEntity, {
       username: input.username,
       password: hashed,
       nickname: input.nickname || null,
@@ -56,9 +62,14 @@ export class UsersService {
       status: 'active',
       tenantId: 0,
     });
-    const saved = await manager.save(entity);
-    saved.tenantId = saved.id;
-    return manager.save(saved);
+    const id = Number(insertResult.identifiers[0].id);
+    await manager.update(UserEntity, id, { tenantId: id });
+
+    const saved = await manager.findOne(UserEntity, { where: { id } });
+    if (!saved) {
+      throw new BadRequestException('创建用户失败');
+    }
+    return saved;
   }
 
   /** 注册失败补偿：删除未完成的用户记录 */

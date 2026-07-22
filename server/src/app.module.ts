@@ -28,6 +28,7 @@ import { ItemDraftModule } from './modules/item-draft/item-draft.module';
 import { ListingRewriteModule } from './modules/listing-rewrite/listing-rewrite.module';
 import { AiModule } from './modules/ai/ai.module';
 import { SignModule } from './modules/sign/sign.module';
+import { ResearchModule } from './modules/research/research.module';
 import { XianyuModule } from './xianyu/xianyu.module';
 
 @Module({
@@ -123,6 +124,7 @@ import { XianyuModule } from './xianyu/xianyu.module';
     LicenseModule,
     ItemDraftModule,
     ListingRewriteModule,
+    ResearchModule, // 项目研究系统（/api/research/*）
   ],
   providers: [
     // 全局限流守卫：未显式 @SkipThrottle() 的路由都会被限流

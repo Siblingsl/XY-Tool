@@ -2,12 +2,14 @@
 node_modules/
 server/node_modules/
 web/node_modules/
+web-research/node_modules/
 
 # Build output
 dist/
 build/
 server/dist/
 web/dist/
+web-research/dist/
 
 # Environment
 .env

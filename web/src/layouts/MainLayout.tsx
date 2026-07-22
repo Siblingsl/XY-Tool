@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Badge, Layout, Menu, theme, Avatar, Space, Typography, Tooltip } from 'antd';
+import { Badge, Layout, Menu, theme, Avatar, Space, Typography, Tooltip, Select } from 'antd';
 import {
   DashboardOutlined,
   UserOutlined,
@@ -13,12 +13,21 @@ import {
   SafetyCertificateOutlined,
   FormOutlined,
   RobotOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { apiPath } from '../api/config';
 import { wsClient, type WsStatus } from '../api/ws';
 
 const { Header, Sider, Content } = Layout;
+
+const SISTER_APP_URL =
+  import.meta.env.VITE_SISTER_APP_URL || 'http://localhost:5174';
+
+const SYSTEM_OPTIONS = [
+  { value: 'xianyu', label: '闲鱼自动发货系统' },
+  { value: 'research', label: '项目研究系统' },
+];
 
 const statusMeta: Record<WsStatus, { color: string; text: string }> = {
   connected: { color: '#52c41a', text: '已连接' },
@@ -82,6 +91,14 @@ export default function MainLayout() {
     navigate('/login', { replace: true });
   };
 
+  const handleSystemSwitch = (value: string) => {
+    if (value === 'research') {
+      const url = new URL(SISTER_APP_URL);
+      url.searchParams.set('from', 'switch');
+      window.location.href = url.toString();
+    }
+  };
+
   const menuItems = [
     { key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' },
     { key: '/accounts', icon: <UserOutlined />, label: '闲鱼账号' },
@@ -125,26 +142,39 @@ export default function MainLayout() {
             padding: '0 24px',
             background: colorBgContainer,
             display: 'flex',
-            justifyContent: 'flex-end',
+            justifyContent: 'space-between',
             alignItems: 'center',
             gap: 16,
           }}
         >
-          <Tooltip title={statusMeta[wsStatus].text}>
-            <Badge
-              status={wsStatus === 'connected' ? 'success' : wsStatus === 'connecting' ? 'processing' : 'error'}
-            />
-            <WifiOutlined style={{ color: statusMeta[wsStatus].color }} />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {statusMeta[wsStatus].text}
-            </Typography.Text>
-          </Tooltip>
           <Space>
-            <Avatar icon={<UserOutlined />} />
-            <Typography.Text>{user?.nickname || user?.username}</Typography.Text>
-            <Typography.Link onClick={handleLogout}>
-              <LogoutOutlined /> 退出
-            </Typography.Link>
+            <AppstoreOutlined style={{ color: '#1677ff' }} />
+            <Select
+              value="xianyu"
+              options={SYSTEM_OPTIONS}
+              onChange={handleSystemSwitch}
+              style={{ width: 200 }}
+              popupMatchSelectWidth={false}
+              aria-label="管理系统切换"
+            />
+          </Space>
+          <Space size="middle">
+            <Tooltip title={statusMeta[wsStatus].text}>
+              <Badge
+                status={wsStatus === 'connected' ? 'success' : wsStatus === 'connecting' ? 'processing' : 'error'}
+              />
+              <WifiOutlined style={{ color: statusMeta[wsStatus].color }} />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {statusMeta[wsStatus].text}
+              </Typography.Text>
+            </Tooltip>
+            <Space>
+              <Avatar icon={<UserOutlined />} />
+              <Typography.Text>{user?.nickname || user?.username}</Typography.Text>
+              <Typography.Link onClick={handleLogout}>
+                <LogoutOutlined /> 退出
+              </Typography.Link>
+            </Space>
           </Space>
         </Header>
         <Content style={{ margin: 16 }}>
