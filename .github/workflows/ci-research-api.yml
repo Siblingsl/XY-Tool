@@ -1,0 +1,32 @@
+# CI · Research API（Go）：改动 research/server 时 go test / build
+name: CI · Research API
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'research/server/**'
+      - '.github/workflows/ci-research-api.yml'
+  pull_request:
+    paths:
+      - 'research/server/**'
+
+concurrency:
+  group: ci-research-api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Go build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: research/server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: research/server/go.sum
+      - name: Build
+        run: go build -o /tmp/research-api ./cmd/api

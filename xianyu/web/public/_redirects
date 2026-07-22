@@ -1,0 +1,2 @@
+# SPA history 路由：非静态资源回退到 index.html（/api 由 Pages Functions 处理）
+/*    /index.html   200

@@ -1,0 +1,60 @@
+# ============================================================
+# 研究系统 · 海外小机部署（Postgres + Go API）
+# 用法：
+#   cp .env.example .env   # 填写密钥与域名
+#   docker compose up -d
+# ============================================================
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: research-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-research}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-research}
+      TZ: UTC
+    volumes:
+      - research-pg-data:/var/lib/postgresql/data
+    # 小机：限制连接与共享内存（可按机器调大）
+    command:
+      - postgres
+      - -c
+      - max_connections=50
+      - -c
+      - shared_buffers=128MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-research} -d ${DB_NAME:-research}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # 生产可不暴露端口；本地调试可取消注释
+    # ports:
+    #   - "5434:5432"
+
+  api:
+    image: ${RESEARCH_IMAGE:-ghcr.io/siblingsl/xy-tool-research-api:latest}
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    container_name: research-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-research}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME:-research}
+      DB_SSLMODE: disable
+      PORT: "8080"
+    ports:
+      - "${API_HOST_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  research-pg-data:
