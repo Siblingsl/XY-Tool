@@ -1,7 +1,9 @@
 # ============================================================
 # CD · Server（后端）
 # 触发：push main/master 且改动了 server 相关文件，或打 v* tag。
-# 流程：构建 server 镜像 → GHCR → SSH 部署到自有服务器。
+# 流程：构建 server 镜像 → 推送 GHCR（备份/回滚）→ 在 Runner 上
+#       docker save 打包 → SCP 到服务器 → docker load → 启动。
+# 说明：国内机直拉 GHCR 极慢，故部署不走 compose pull，改由 CI 传包。
 #
 # GitHub Secrets：SSH_HOST / SSH_USER / SSH_KEY / SSH_PORT
 # GitHub Variables：
@@ -44,6 +46,10 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      owner: ${{ steps.meta.outputs.owner }}
+      repo: ${{ steps.meta.outputs.repo }}
+      short_sha: ${{ steps.meta.outputs.short_sha }}
 
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +84,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ---------- 后端：SSH 部署到服务器 ----------
+  # ---------- 后端：SCP 镜像包 + SSH 部署 ----------
   deploy-backend:
     name: Deploy Backend to Server
     runs-on: ubuntu-latest
@@ -88,26 +94,52 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sync deploy files to server
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull & pack image on runner
+        env:
+          OWNER: ${{ needs.build-server.outputs.owner }}
+          REPO: ${{ needs.build-server.outputs.repo }}
+          SHORT_SHA: ${{ needs.build-server.outputs.short_sha }}
+        run: |
+          IMAGE_SHA="${{ env.REGISTRY }}/${OWNER}/${REPO}-server:${SHORT_SHA}"
+          IMAGE_LATEST="${{ env.REGISTRY }}/${OWNER}/${REPO}-server:latest"
+          echo "Pulling $IMAGE_SHA ..."
+          docker pull "$IMAGE_SHA"
+          docker tag "$IMAGE_SHA" "$IMAGE_LATEST"
+          echo "Saving compressed image archive..."
+          docker save "$IMAGE_SHA" "$IMAGE_LATEST" | gzip -1 > server-image.tar.gz
+          ls -lh server-image.tar.gz
+
+      - name: Sync image + deploy files to server
         uses: appleboy/scp-action@v1.0.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          source: "docker-compose.prod.yml,scripts/deploy.sh,nginx/api.conf"
+          source: "server-image.tar.gz,docker-compose.prod.yml,scripts/deploy.sh,nginx/api.conf"
           target: ${{ vars.DEPLOY_DIR || '/opt/xianyu-tool' }}
+          overwrite: true
+          timeout: 120s
 
-      - name: Deploy via SSH
+      - name: Load image & deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          # 默认约 10m；国内机拉 GHCR 镜像常超过该时间
-          command_timeout: 60m
+          command_timeout: 20m
           script: |
+            set -euo pipefail
             cd ${{ vars.DEPLOY_DIR || '/opt/xianyu-tool' }}
+            echo "Loading image from archive..."
+            gunzip -c server-image.tar.gz | docker load
+            rm -f server-image.tar.gz
             chmod +x scripts/deploy.sh
-            bash scripts/deploy.sh deploy
+            bash scripts/deploy.sh deploy --skip-pull

@@ -3,9 +3,10 @@
 # 闲鱼自动发货工具 - 部署/回滚脚本（在服务器上运行）
 #
 # 用法：
-#   ./deploy.sh              # 部署最新镜像
-#   ./deploy.sh rollback <sha>  # 回滚到指定 sha 的镜像
-#   ./deploy.sh status       # 查看运行状态
+#   ./deploy.sh                    # 从 GHCR pull 后部署
+#   ./deploy.sh deploy --skip-pull # 使用本地已 load 的镜像部署（CI 传包用）
+#   ./deploy.sh rollback <sha>     # 回滚到指定 sha 的镜像
+#   ./deploy.sh status             # 查看运行状态
 #
 # 前置：已在服务器配置好 .env.prod（IMAGE_OWNER/IMAGE_REPO/密钥等）
 # ============================================================
@@ -67,8 +68,22 @@ compose() {
 # ============ 子命令 ============
 
 cmd_deploy() {
-  log "拉取 server 镜像..."
-  compose pull server
+  # CI 已通过 SCP + docker load 写入镜像时传 --skip-pull，避免国内机直拉 GHCR 极慢/超时
+  local skip_pull=false
+  if [ "${1:-}" = "--skip-pull" ] || [ "${SKIP_PULL:-}" = "1" ]; then
+    skip_pull=true
+  fi
+
+  if [ "$skip_pull" = true ]; then
+    log "跳过远程拉取（使用本地已 load 的镜像）"
+    if ! docker image inspect "ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-server:latest" >/dev/null 2>&1; then
+      err "本地不存在 ghcr.io/${IMAGE_OWNER}/${IMAGE_REPO}-server:latest，无法 --skip-pull"
+      exit 1
+    fi
+  else
+    log "拉取 server 镜像..."
+    compose pull server
+  fi
 
   # 记录当前 server 镜像 digest（用于回滚）
   local cur_digest
@@ -160,11 +175,11 @@ wait_health() {
 # ============ 入口 ============
 
 case "${1:-deploy}" in
-  deploy)   cmd_deploy ;;
+  deploy)   cmd_deploy "${2:-}" ;;
   rollback) cmd_rollback "${2:-}" ;;
   status)   cmd_status ;;
   *)
-    echo "用法：$0 {deploy|rollback [sha]|status}"
+    echo "用法：$0 {deploy [--skip-pull]|rollback [sha]|status}"
     exit 1
     ;;
 esac
