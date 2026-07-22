@@ -49,7 +49,7 @@ type userDTO struct {
 func (h *Handler) register(c *gin.Context) {
 	var req credentials
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, http.StatusBadRequest, "请求参数无效")
+		response.Error(c, http.StatusBadRequest, "请求参数无效 啦啦啦啦啦啦")
 		return
 	}
 
