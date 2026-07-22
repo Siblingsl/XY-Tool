@@ -48,9 +48,9 @@ async function bootstrap() {
     process.exit(1);
   }
 
-  // 2. CORS
+  // 2. CORS（origin 可为字符串数组，见 CORS_ORIGIN 逗号分隔）
   app.enableCors({
-    origin: config.get<string>('cors.origin'),
+    origin: config.get<string | string[]>('cors.origin'),
     credentials: true,
   });
 

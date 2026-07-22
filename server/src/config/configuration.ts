@@ -123,7 +123,12 @@ export default () => ({
   },
 
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    // 支持逗号分隔多前端源，例如：
+    // https://xy.skyed.dpdns.org,https://emailanalysis.skyed.dpdns.org
+    origin: (process.env.CORS_ORIGIN || 'http://localhost:5173')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   },
 
   /** 全局限流（毫秒窗口 + 最大请求数）。auth 路由另在 Controller 收紧。 */

@@ -1,16 +1,33 @@
 /**
  * 研究系统 API 服务层。
- * 替换 Mock 数据，调用真实后端 /api/research/* 接口。
+ * - 开发：默认 /api（Vite 代理到本地后端）
+ * - 生产：构建时注入 VITE_API_BASE_URL（如 https://xy-api.skyed.dpdns.org/api）
+ *   浏览器直连 API；CF Pages 的 _redirects 无法可靠反代外部源。
  */
 
-const API_BASE = '/api/research';
+const API_ROOT =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ||
+  '/api';
+
+const RESEARCH_BASE = `${API_ROOT}/research`;
+
+function apiUrl(rootRelativePath: string): string {
+  const path = rootRelativePath.startsWith('/')
+    ? rootRelativePath
+    : `/${rootRelativePath}`;
+  if (API_ROOT === '/api') {
+    return path.startsWith('/api') ? path : `/api${path}`;
+  }
+  const suffix = path.startsWith('/api') ? path.slice(4) : path;
+  return `${API_ROOT}${suffix}`;
+}
 
 // 获取存储的 token
 function getToken(): string | null {
   return localStorage.getItem('research_token');
 }
 
-// 通用请求封装
+// 通用请求封装（research 区）
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -25,7 +42,7 @@ async function request<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${RESEARCH_BASE}${path}`, {
     ...options,
     headers,
   });
@@ -50,7 +67,7 @@ async function request<T>(
 
 export const authApi = {
   login: async (username: string, password: string) => {
-    const response = await fetch('/api/auth/login', {
+    const response = await fetch(apiUrl('/auth/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
