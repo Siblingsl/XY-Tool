@@ -65,25 +65,35 @@ async function request<T>(
 
 // ============ Auth ============
 
-export const authApi = {
-  login: async (username: string, password: string) => {
-    const response = await fetch(apiUrl('/auth/login'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
-    if (!response.ok) {
-      throw new Error('登录失败');
-    }
-    const json = await response.json();
-    // 解包 TransformInterceptor 的 { code, message, data } 包装
-    const data = json && typeof json === 'object' && 'data' in json ? json.data : json;
+async function postAuth(path: '/auth/login' | '/auth/register', username: string, password: string) {
+  const response = await fetch(apiUrl(path), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  });
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(json?.message || (path === '/auth/register' ? '注册失败' : '登录失败'));
+  }
+  const data = json && typeof json === 'object' && 'data' in json ? json.data : json;
+  if (data?.accessToken) {
     localStorage.setItem('research_token', data.accessToken);
-    return data;
-  },
+  }
+  if (data?.refreshToken) {
+    localStorage.setItem('research_refresh_token', data.refreshToken);
+  }
+  return data;
+}
+
+export const authApi = {
+  login: (username: string, password: string) => postAuth('/auth/login', username, password),
+
+  register: (username: string, password: string) =>
+    postAuth('/auth/register', username, password),
 
   logout: () => {
     localStorage.removeItem('research_token');
+    localStorage.removeItem('research_refresh_token');
   },
 
   isAuthenticated: () => {
