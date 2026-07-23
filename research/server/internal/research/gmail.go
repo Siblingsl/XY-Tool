@@ -362,6 +362,22 @@ func (h *GmailHandler) SyncEmails(tenantID int64) (int, error) {
 			continue
 		}
 		synced++
+
+		// Pipeline: parse the email into a research project (heuristic, no LLM).
+		// Skip emails that have already produced a project.
+		var dup int64
+		h.db.Model(&models.ResearchProject{}).Where("tenant_id = ? AND email_id = ?", tenantID, email.ID).Count(&dup)
+		if dup == 0 {
+			if project := ParseEmailToProject(tenantID, email); project != nil {
+				if cerr := h.db.Create(project).Error; cerr != nil {
+					log.Printf("create project from email %s: %v", msg.Id, cerr)
+				} else if key := ClusterKeyOf(project); key != "" {
+					if cid := assignOrCreateCluster(h.db, tenantID, key, project.ID); cid != nil {
+						_ = h.db.Model(project).Update("cluster_id", cid).Error
+					}
+				}
+			}
+		}
 	}
 
 	if list.ResultSizeEstimate > 0 {

@@ -13,7 +13,7 @@ type ResearchDailyReport struct {
 	ReportDate  time.Time      `gorm:"column:report_date;type:date;not null" json:"reportDate"`
 	SummaryJSON datatypes.JSON `gorm:"column:summary_json;type:jsonb" json:"summaryJson"`
 	BodyMD      *string        `gorm:"column:body_md;type:text" json:"bodyMd"`
-	ProjectIDs  pq.StringArray `gorm:"column:project_ids;type:uuid[]" json:"projectIds"`
+	ProjectIDs  UUIDArray `gorm:"column:project_ids;type:uuid[]" json:"projectIds"`
 }
 
 func (ResearchDailyReport) TableName() string { return "research_daily_reports" }

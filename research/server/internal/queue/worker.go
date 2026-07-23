@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -16,6 +17,7 @@ const (
 	JobReverify  JobType = "reverify"
 	JobRescore   JobType = "rescore"
 	JobGenerate  JobType = "generate"
+	JobRunSkills JobType = "run_skills"
 )
 
 type JobPayload struct {
@@ -29,10 +31,16 @@ type SyncRunner interface {
 	SyncEmails(tenantID int64) (int, error)
 }
 
+// SkillRunner 技能执行接口
+type SkillRunner interface {
+	RunForTenant(ctx context.Context, tenantID int64) int
+}
+
 type Worker struct {
-	db      *gorm.DB
-	syncer  SyncRunner
-	jobs    chan JobPayload
+	db          *gorm.DB
+	syncer      SyncRunner
+	skillRunner SkillRunner
+	jobs        chan JobPayload
 }
 
 func NewWorker(db *gorm.DB, syncer SyncRunner) *Worker {
@@ -43,6 +51,10 @@ func NewWorker(db *gorm.DB, syncer SyncRunner) *Worker {
 	}
 	go w.run()
 	return w
+}
+
+func (w *Worker) SetSkillRunner(sr SkillRunner) {
+	w.skillRunner = sr
 }
 
 func (w *Worker) Enqueue(job JobPayload) {
@@ -71,9 +83,18 @@ func (w *Worker) process(payload JobPayload) {
 	switch payload.Type {
 	case JobSync:
 		_, err = w.syncer.SyncEmails(payload.TenantID)
-	case JobReverify, JobRescore, JobGenerate:
-		// Stub: mark done immediately
-		err = nil
+		// sync 完成后自动执行技能
+		if err == nil && w.skillRunner != nil {
+			skillCount := w.skillRunner.RunForTenant(context.Background(), payload.TenantID)
+			log.Printf("skills executed for %d emails (tenant %d)", skillCount, payload.TenantID)
+		}
+	case JobRunSkills:
+		if w.skillRunner != nil {
+			w.skillRunner.RunForTenant(context.Background(), payload.TenantID)
+		}
+	// JobReverify / JobRescore / JobGenerate are implemented inline in their
+	// handlers (real DB writes + automation events); the worker only records
+	// the job lifecycle here so the jobs view stays accurate.
 	default:
 		err = nil
 	}

@@ -1,17 +1,31 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, Col, List, Row, Spin, Statistic, Typography, message } from 'antd';
+import { Button, Card, Col, Empty, List, Row, Spin, Statistic, Tag, Typography, message } from 'antd';
 import { Link } from 'react-router-dom';
-import { reportsApi, DailyReport } from '../services/api';
+import { reportsApi, DailyReport, ReportGroupItem } from '../services/api';
+import PageHeader from '../components/PageHeader';
 
 export default function Reports() {
   const [loading, setLoading] = useState(true);
   const [reports, setReports] = useState<DailyReport[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [groups, setGroups] = useState<{
+    do: ReportGroupItem[];
+    watch: ReportGroupItem[];
+    skip: ReportGroupItem[];
+  } | null>(null);
 
   useEffect(() => {
     loadReports();
   }, []);
+
+  useEffect(() => {
+    if (selectedDate) {
+      loadGroups(selectedDate);
+    } else {
+      setGroups(null);
+    }
+  }, [selectedDate]);
 
   const loadReports = async () => {
     try {
@@ -24,6 +38,16 @@ export default function Reports() {
       console.error('Failed to load reports:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadGroups = async (date: string) => {
+    try {
+      const g = await reportsApi.groups(date);
+      setGroups(g);
+    } catch (err) {
+      console.error('Failed to load report groups:', err);
+      setGroups(null);
     }
   };
 
@@ -53,9 +77,10 @@ export default function Reports() {
 
   return (
     <div>
-      <Typography.Title level={3} style={{ marginTop: 0 }}>
-        每日报告
-      </Typography.Title>
+      <PageHeader
+        title="每日报告"
+        subtitle="基于当日分析聚合的研究简报，可手动触发生成。"
+      />
       <Row gutter={16}>
         <Col xs={24} md={7}>
           <Card
@@ -75,7 +100,7 @@ export default function Reports() {
                   onClick={() => setSelectedDate(item.reportDate)}
                   style={{
                     cursor: 'pointer',
-                    background: item.reportDate === selectedDate ? '#f0fdfa' : undefined,
+                    background: item.reportDate === selectedDate ? 'var(--brand-tint)' : undefined,
                     padding: '8px 12px',
                     borderRadius: 6,
                   }}
@@ -97,7 +122,7 @@ export default function Reports() {
                   <Statistic title="共分析" value={summary?.total || 0} />
                 </Col>
                 <Col span={6}>
-                  <Statistic title="值得研究" value={summary?.do || 0} valueStyle={{ color: '#0f766e' }} />
+                  <Statistic title="值得研究" value={summary?.do || 0} valueStyle={{ color: 'var(--ok)' }} />
                 </Col>
                 <Col span={6}>
                   <Statistic title="建议放弃" value={summary?.skip || 0} />
@@ -118,6 +143,45 @@ export default function Reports() {
                     </Link>
                   ))}
                 </p>
+              )}
+
+              {groups && (
+                <Row gutter={16} style={{ marginTop: 16 }}>
+                  {(
+                    [
+                      { key: 'do', label: '建议做', color: 'success' },
+                      { key: 'watch', label: '观察', color: 'warning' },
+                      { key: 'skip', label: '放弃', color: 'error' },
+                    ] as const
+                  ).map((g) => {
+                    const items = groups[g.key] || [];
+                    return (
+                      <Col xs={24} md={8} key={g.key}>
+                        <Card size="small" title={`${g.label} · ${items.length}`}>
+                          {items.length === 0 ? (
+                            <Empty
+                              image={Empty.PRESENTED_IMAGE_SIMPLE}
+                              description="无"
+                            />
+                          ) : (
+                            <List
+                              size="small"
+                              dataSource={items}
+                              renderItem={(it: ReportGroupItem) => (
+                                <List.Item>
+                                  <Link to={`/projects/${it.id}`}>
+                                    <Tag color={g.color}>{g.label}</Tag>
+                                    {it.name || it.id.slice(0, 8)}
+                                  </Link>
+                                </List.Item>
+                              )}
+                            />
+                          )}
+                        </Card>
+                      </Col>
+                    );
+                  })}
+                </Row>
               )}
             </Card>
           ) : (

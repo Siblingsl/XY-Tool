@@ -2,6 +2,15 @@
 node_modules/
 **/node_modules/
 
+# Local one-click startup (Windows only — never ship / never affect prod)
+.dev/
+**/.dev/
+**/dev.ps1
+**/dev.cmd
+research/package.json
+xianyu/package.json
+research/docker-compose.dev.yml
+
 # Build output
 dist/
 build/
@@ -63,3 +72,9 @@ research/server/bin/
 **/.vite/
 
 Reference_Projects/
+
+.workbuddy/
+
+docs/
+
+ui-redesign/

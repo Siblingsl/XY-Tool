@@ -3,6 +3,7 @@ import { Button, Card, Col, Row, Spin, Steps, Table, Tag, Typography, message } 
 import type { ColumnsType } from 'antd/es/table';
 import { jobsApi, PipelineJob } from '../services/api';
 import dayjs from 'dayjs';
+import PageHeader from '../components/PageHeader';
 
 const statusColor: Record<string, string> = {
   queued: 'default',
@@ -113,12 +114,10 @@ export default function Pipeline() {
 
   return (
     <div>
-      <Typography.Title level={3} style={{ marginTop: 0 }}>
-        Agent 流水线
-      </Typography.Title>
-      <Typography.Paragraph type="secondary">
-        五层：邮件解析 → 项目识别 → 真伪验证 → 可落地评分 → 每日报告
-      </Typography.Paragraph>
+      <PageHeader
+        title="Agent 流水线"
+        subtitle="五层：邮件解析 → 项目识别 → 真伪验证 → 可落地评分 → 每日报告"
+      />
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={24}>

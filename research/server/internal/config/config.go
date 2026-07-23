@@ -9,26 +9,26 @@ import (
 )
 
 type Config struct {
-	Port                 string
-	DatabaseURL          string
-	JWTSecret            string
-	JWTRefreshSecret     string
-	CORSOrigins          []string
-	GoogleClientID       string
-	GoogleClientSecret   string
-	GoogleRedirectURI    string
-	GoogleProxyURL       string
-	GoogleProxyKey       string
-	ResearchFrontendURL  string
-	ResearchTokenKey     string
+	Port                string
+	DatabaseURL         string
+	JWTSecret           string
+	JWTRefreshSecret    string
+	CORSOrigins         []string
+	GoogleClientID      string
+	GoogleClientSecret  string
+	GoogleRedirectURI   string
+	GoogleProxyURL      string
+	GoogleProxyKey      string
+	ResearchFrontendURL string
+	ResearchTokenKey    string
 }
 
 func Load() (*Config, error) {
-	_ = godotenv.Load()
+	loadDotEnv()
 
 	cfg := &Config{
 		Port:                getEnv("PORT", "8080"),
-		DatabaseURL:         os.Getenv("DATABASE_URL"),
+		DatabaseURL:         strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		JWTSecret:           os.Getenv("JWT_SECRET"),
 		JWTRefreshSecret:    os.Getenv("JWT_REFRESH_SECRET"),
 		GoogleClientID:      os.Getenv("GOOGLE_CLIENT_ID"),
@@ -42,14 +42,15 @@ func Load() (*Config, error) {
 
 	if cfg.DatabaseURL == "" {
 		host := getEnv("DB_HOST", "localhost")
-		port := getEnv("DB_PORT", "5432")
-		user := getEnv("DB_USER", "postgres")
+		port := getEnv("DB_PORT", "5434")
+		user := getEnv("DB_USER", "research")
 		password := os.Getenv("DB_PASSWORD")
 		name := getEnv("DB_NAME", "research")
 		sslmode := getEnv("DB_SSLMODE", "disable")
+		// Quote values so empty password / special chars stay valid in libpq keyword/value format.
 		cfg.DatabaseURL = fmt.Sprintf(
 			"host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-			host, port, user, password, name, sslmode,
+			quoteConn(host), quoteConn(port), quoteConn(user), quoteConn(password), quoteConn(name), quoteConn(sslmode),
 		)
 	}
 
@@ -66,6 +67,36 @@ func Load() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// loadDotEnv reads .env and strips a UTF-8 BOM (PowerShell Set-Content -Encoding UTF8 adds one,
+// which makes joho/godotenv reject the file and fall back to wrong DB defaults).
+func loadDotEnv() {
+	data, err := os.ReadFile(".env")
+	if err != nil {
+		_ = godotenv.Load()
+		return
+	}
+	if len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF {
+		data = data[3:]
+	}
+	env, err := godotenv.Unmarshal(string(data))
+	if err != nil {
+		_ = godotenv.Load()
+		return
+	}
+	for k, v := range env {
+		if _, exists := os.LookupEnv(k); !exists {
+			_ = os.Setenv(k, v)
+		}
+	}
+}
+
+func quoteConn(v string) string {
+	if v == "" || strings.ContainsAny(v, " '\\") {
+		return "'" + strings.ReplaceAll(v, "'", `\'`) + "'"
+	}
+	return v
 }
 
 func getEnv(key, fallback string) string {

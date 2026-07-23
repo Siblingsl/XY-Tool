@@ -14,6 +14,7 @@ import {
 import { SyncOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { gmailApi, settingsApi, Settings as SettingsType } from '../services/api';
+import PageHeader from '../components/PageHeader';
 
 export default function Settings() {
   const [loading, setLoading] = useState(true);
@@ -94,9 +95,10 @@ export default function Settings() {
 
   return (
     <div>
-      <Typography.Title level={3} style={{ marginTop: 0 }}>
-        设置
-      </Typography.Title>
+      <PageHeader
+        title="设置"
+        subtitle="配置 Gmail 授权、营销过滤与每日报告节奏。"
+      />
 
       <Card title="Gmail 授权" style={{ marginBottom: 16 }}>
         <Space direction="vertical">

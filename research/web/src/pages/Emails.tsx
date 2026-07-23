@@ -3,6 +3,7 @@ import { Drawer, Select, Space, Spin, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { emailsApi, Email } from '../services/api';
 import dayjs from 'dayjs';
+import PageHeader from '../components/PageHeader';
 
 const statusColor: Record<string, string> = {
   done: 'success',
@@ -68,7 +69,10 @@ export default function Emails() {
       width: 220,
       render: (cats: string[] | null) =>
         cats?.map((c) => (
-          <Tag key={c} color="cyan">
+          <Tag
+            key={c}
+            style={{ background: 'var(--brand-tint)', color: 'var(--brand-700)', border: 'none' }}
+          >
             {c}
           </Tag>
         )) || '-',
@@ -83,9 +87,10 @@ export default function Emails() {
 
   return (
     <div>
-      <Typography.Title level={3} style={{ marginTop: 0 }}>
-        邮件流水
-      </Typography.Title>
+      <PageHeader
+        title="邮件流水"
+        subtitle="来自 Gmail 的订阅与产品动态，已自动分类与解析。"
+      />
       <Space style={{ marginBottom: 16 }}>
         <Select
           allowClear

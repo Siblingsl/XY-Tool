@@ -1,13 +1,15 @@
 import { Card, Descriptions, Typography } from 'antd';
+import PageHeader from '../components/PageHeader';
 
 export default function Profile() {
   const user = JSON.parse(localStorage.getItem('research_user') || '{}');
 
   return (
     <div>
-      <Typography.Title level={3} style={{ marginTop: 0 }}>
-        个人中心
-      </Typography.Title>
+      <PageHeader
+        title="个人中心"
+        subtitle="查看当前登录身份与项目区信息。"
+      />
       <Card>
         <Descriptions column={1} bordered size="small">
           <Descriptions.Item label="用户名">{user.username || 'demo'}</Descriptions.Item>

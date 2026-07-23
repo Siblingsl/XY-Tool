@@ -2,7 +2,6 @@ package models
 
 import (
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 	"gorm.io/datatypes"
 )
 
@@ -10,7 +9,7 @@ type ResearchCluster struct {
 	ResearchBase
 	Key        string          `gorm:"size:100;not null" json:"key"`
 	Label      string          `gorm:"size:255;not null" json:"label"`
-	ProjectIDs pq.StringArray  `gorm:"column:project_ids;type:uuid[]" json:"projectIds"`
+	ProjectIDs UUIDArray `gorm:"column:project_ids;type:uuid[]" json:"projectIds"`
 }
 
 func (ResearchCluster) TableName() string { return "research_clusters" }
@@ -29,6 +28,7 @@ type ResearchProject struct {
 	ScoreJSON          datatypes.JSON `gorm:"column:score_json;type:jsonb" json:"scoreJson"`
 	Summary            *string        `gorm:"size:500" json:"summary"`
 	Stars              *int           `json:"stars"`
+	Favorited          bool           `gorm:"column:favorited;default:false" json:"favorited"`
 }
 
 func (ResearchProject) TableName() string { return "research_projects" }

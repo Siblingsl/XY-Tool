@@ -10,6 +10,7 @@ import (
 	"github.com/siblingsl/xy-tool/research-server/internal/middleware"
 	"github.com/siblingsl/xy-tool/research-server/internal/queue"
 	"github.com/siblingsl/xy-tool/research-server/internal/research"
+	"github.com/siblingsl/xy-tool/research-server/internal/skill"
 )
 
 func main() {
@@ -30,6 +31,11 @@ func main() {
 	worker := queue.NewWorker(gormDB, gmailHandler)
 	gmailHandler.SetWorker(worker)
 
+	// Skill 引擎
+	skillRegistry := skill.DefaultRegistry()
+	skillExecutor := skill.NewExecutor(gormDB, skillRegistry)
+	worker.SetSkillRunner(skillExecutor)
+
 	authSvc := auth.NewService(gormDB, cfg)
 	authHandler := auth.NewHandler(authSvc)
 
@@ -37,8 +43,20 @@ func main() {
 	emailsHandler := research.NewEmailsHandler(gormDB)
 	projectsHandler := research.NewProjectsHandler(gormDB, worker)
 	reportsHandler := research.NewReportsHandler(gormDB, worker)
+	clustersHandler := research.NewClustersHandler(gormDB)
+	tagsHandler := research.NewTagsHandler(gormDB)
+	notesHandler := research.NewNotesHandler(gormDB)
+	aggregateHandler := research.NewAggregateHandler(gormDB)
+	compareHandler := research.NewCompareHandler(gormDB)
+	notificationHandler := research.NewNotificationHandler(gormDB)
+	competitorHandler := research.NewCompetitorHandler(gormDB)
+	automationHandler := research.NewAutomationHandler(gormDB)
+	knowledgeHandler := research.NewKnowledgeHandler(gormDB)
+	similarHandler := research.NewSimilarHandler(gormDB)
+	scrapeHandler := research.NewScrapeHandler(gormDB)
 	jobsHandler := research.NewJobsHandler(gormDB, worker)
 	settingsHandler := research.NewSettingsHandler(gormDB)
+	skillsHandler := research.NewSkillsHandler(gormDB, skillRegistry)
 
 	if cfg.JWTSecret == "" {
 		log.Println("warning: JWT_SECRET is not set")
@@ -59,8 +77,23 @@ func main() {
 	emailsHandler.RegisterRoutes(researchGroup, jwtAuth)
 	projectsHandler.RegisterRoutes(researchGroup, jwtAuth)
 	reportsHandler.RegisterRoutes(researchGroup, jwtAuth)
+	clustersHandler.RegisterRoutes(researchGroup, jwtAuth)
+	tagsHandler.RegisterRoutes(researchGroup, jwtAuth)
+	notesHandler.RegisterRoutes(researchGroup, jwtAuth)
+	aggregateHandler.RegisterRoutes(researchGroup, jwtAuth)
+	notificationHandler.RegisterRoutes(researchGroup, jwtAuth)
+	competitorHandler.RegisterRoutes(researchGroup, jwtAuth)
+	automationHandler.RegisterRoutes(researchGroup, jwtAuth)
+	knowledgeHandler.RegisterRoutes(researchGroup, jwtAuth)
+	similarHandler.RegisterRoutes(researchGroup, jwtAuth)
+	scrapeHandler.RegisterRoutes(researchGroup, jwtAuth)
+	compareHandler.RegisterRoutes(researchGroup, jwtAuth)
 	jobsHandler.RegisterRoutes(researchGroup, jwtAuth)
 	settingsHandler.RegisterRoutes(researchGroup, jwtAuth)
+	skillsHandler.RegisterRoutes(researchGroup, jwtAuth)
+
+	// 定时网页抓取调度器（周期扫描 enabled 任务，落库到知识库）
+	research.StartScheduler(gormDB)
 
 	addr := ":" + cfg.Port
 	log.Printf("research-server listening on %s", addr)
