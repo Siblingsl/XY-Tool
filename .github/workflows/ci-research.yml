@@ -1,4 +1,5 @@
 # CI · Research（邮件分析前端）：push/PR 改动 research/web/** 时 install → build。
+# retrigger: 2026-07-23
 name: CI · Research
 
 on:

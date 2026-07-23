@@ -1,4 +1,5 @@
 # CI · Research API（Go）：改动 research/server 时 go test / build
+# retrigger: 2026-07-23
 name: CI · Research API
 
 on:

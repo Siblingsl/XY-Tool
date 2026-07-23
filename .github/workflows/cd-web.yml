@@ -1,5 +1,6 @@
 # ============================================================
 # CD · Web（闲鱼前端）
+# retrigger: 2026-07-23
 # 触发：push main/master 且改动了 xianyu/web/** 。
 #
 # GitHub Variables（可选）：

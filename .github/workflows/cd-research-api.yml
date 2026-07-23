@@ -1,5 +1,6 @@
 # ============================================================
 # CD · Research API（海外 Go 后端）
+# retrigger: 2026-07-23
 # 触发：push main/master 且改动 research/server 或 research/deploy。
 # 流程：构建镜像 → GHCR → SSH 到海外机 compose pull/up。
 #

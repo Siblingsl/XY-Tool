@@ -1,5 +1,6 @@
 # ============================================================
 # CD · Research Web（邮件分析前端 → Cloudflare Pages）
+# retrigger: 2026-07-23
 # 触发：push main/master 且改动了 research/web/** 。
 # API 指向海外 Go 后端：RESEARCH_API_BASE_URL（或 VITE_RESEARCH_API_BASE_URL）
 #
